@@ -1,0 +1,75 @@
+# All config keys MUST be identical across all cluster nodes.
+# Only `peer.bind` (management IP) and `peers` list differ per node.
+# `peer.port` and `peer.token` MUST be identical on all nodes.
+# See docs/config.md for full field reference.
+
+log_file: /var/log/dns-ha-agent.log   # optional — logs to stdout if empty
+log_level: info                       # debug | info | warn | error
+
+agent:
+  interval: 5s
+  interface: "vtnet0"                  # management interface — for node IP and peer communication
+  vip_interface: "vtnet1"              # VIP/CARP interface — agent brings it DOWN on unhealthy (triggers failover)
+  vhid: 1                              # CARP VHID — must match /etc/rc.conf
+  state_file: "/var/db/dns-ha-agent.state"  # optional — persists last state across restarts
+
+health:
+  process_check: true
+  process_names: ["dnsdist"]           # one or more processes to pgrep — e.g. ["dnsdist","named"] for dnsdist+bind9, or ["named"] for BIND9 only
+  tcp_check: true
+  udp_check: true
+  dns_query:
+    enabled: true
+    domain: "google.com"
+    timeout: 2s
+  bind_address: "127.0.0.1:53"         # change if the DNS server listens on a public IP
+  weights:                             # optional — relative weights per check (default 25/25/25/25). 0 = skip weight (use flag to disable)
+    process: 25
+    tcp: 25
+    udp: 25
+    dns: 25
+
+carp:
+  demotion_healthy: 0
+  demotion_degraded: 50
+  demotion_unhealthy: 255
+
+policy:
+  mode: "preempt"                      # "preempt" | "sticky". MUST be "preempt" on all nodes for MASTER reclaim via agent-level preempt. "sticky" never steps down.
+
+peer:
+  enabled: true
+  bind: "10.0.0.1"                     # IP of management interface — MUST be this node's own IP
+  port: ":8845"                        # MUST be identical on all nodes
+  token: "${HA_TOKEN}"                 # shared secret — MUST be identical on all nodes
+  ping: false                          # ICMP check to peer on heartbeat failure — distinguishes "VM dead" vs "service down" in alerts
+  tls:                                 # optional — TLS for peer HTTP
+    enabled: false
+    cert_file: "/usr/local/etc/dns-ha-agent.crt"
+    key_file: "/usr/local/etc/dns-ha-agent.key"
+  peers:
+    - ip: "10.0.0.2"
+      name: "node-b"
+      token: ""                        # optional — pairwise secret (overrides global token for THIS peer only)
+    - ip: "10.0.0.3"
+      name: "node-c"
+
+notify:
+  email:
+    enabled: true
+    smtp_host: "mail.example.com"
+    smtp_port: 587
+    username: "agent"
+    password: "${SMTP_PASS}"
+    from: "dns-ha@example.com"
+    to:
+      - "admin@example.com"
+  slack:                               # optional
+    enabled: false
+    webhook_url: "https://hooks.slack.com/services/..."
+  telegram:                            # optional
+    enabled: false
+    bot_token: "${TELEGRAM_TOKEN}"
+    chat_id: "123456789"
+  cooldown: 5m                         # anti-spam: min gap between alerts OF THE SAME KIND (per state transition / per peer / vip-loss), not a global mute
+  vip_loss_alert: true                 # alert when this node loses the VIP with no peer entitled to take it (split-brain guard). Same on every node

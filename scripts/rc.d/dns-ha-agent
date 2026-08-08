@@ -1,0 +1,78 @@
+#!/bin/sh
+
+# PROVIDE: dns_ha_agent
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# NOTE: no REQUIRE: carp — FreeBSD has no rc.d service named "carp"
+# (CARP is configured via ifconfig_* in rc.conf). CARP VIP readiness
+# is checked at runtime by the agent itself (ifconfig polling).
+
+. /etc/rc.subr
+
+name="dns_ha_agent"
+rcvar="dns_ha_agent_enable"
+
+load_rc_config "$name"
+
+: ${dns_ha_agent_enable:="NO"}
+: ${dns_ha_agent_config:="/usr/local/etc/dns-ha-agent.yaml"}
+: ${dns_ha_agent_user:="root"}
+
+pidfile="/var/run/${name}.pid"
+procname="/usr/local/bin/dns-ha-agent"
+command="/usr/sbin/daemon"
+command_args="-f -u ${dns_ha_agent_user} -p ${pidfile} ${procname} -config ${dns_ha_agent_config}"
+
+required_files="${dns_ha_agent_config}"
+
+extra_commands="reload"
+
+# Override status command to check pidfile manually.
+# -p without -r/-R stores the actual child PID, so kill -0 on the pidfile is valid.
+status_cmd="${name}_status"
+dns_ha_agent_status() {
+	if [ ! -f "${pidfile}" ]; then
+		echo "${name} is not running (no pidfile)."
+		return 1
+	fi
+
+	local pid
+	pid=$(cat "${pidfile}" 2>/dev/null | tr -d ' \t\r\n')
+	case "${pid}" in
+		""|*[!0-9]*)
+			echo "${name} is not running (invalid pidfile)."
+			return 1
+			;;
+	esac
+
+	if kill -0 "${pid}" 2>/dev/null; then
+		echo "${name} is running as pid ${pid}."
+		return 0
+	else
+		echo "${name} is not running (stale pidfile ${pidfile})."
+		rm -f "${pidfile}"
+		return 1
+	fi
+}
+
+# Reload: send SIGHUP so the agent reloads the config without restart.
+reload_cmd="${name}_reload"
+dns_ha_agent_reload() {
+	if [ ! -f "${pidfile}" ]; then
+		echo "${name} is not running (no pidfile)."
+		return 1
+	fi
+	local pid
+	pid=$(cat "${pidfile}" 2>/dev/null | tr -d ' \t\r\n')
+	case "${pid}" in
+		""|*[!0-9]*)
+			echo "${name} is not running (invalid pidfile)."
+			return 1
+			;;
+	esac
+	kill -HUP "${pid}"
+	echo "${name} reload requested (pid ${pid})."
+}
+
+run_rc_command "$1"
