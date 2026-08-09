@@ -27,6 +27,10 @@ type AgentConfig struct {
 	VIPInterface string        `yaml:"vip_interface"`
 	VHID         int           `yaml:"vhid"`
 	StateFile    string        `yaml:"state_file"`
+	// RecoveryConfirm is how many consecutive fully-healthy intervals a node
+	// whose VIP interface is down must pass before it reclaims the VIP.
+	// Zero means "unset" and falls back to DefaultRecoveryConfirm.
+	RecoveryConfirm int `yaml:"recovery_confirm"`
 }
 
 type HealthConfig struct {
@@ -153,7 +157,7 @@ type EmailConfig struct {
 var envPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 var knownKeys = map[string]map[string]bool{
-	"agent":     {"interval": true, "interface": true, "vip_interface": true, "vhid": true, "state_file": true},
+	"agent":     {"interval": true, "interface": true, "vip_interface": true, "vhid": true, "state_file": true, "recovery_confirm": true},
 	"log_file":  {},
 	"log_level": {},
 	"health":    {"process_check": true, "process_name": true, "process_names": true, "tcp_check": true, "udp_check": true, "dns_query": true, "bind_address": true, "weights": true},
@@ -278,7 +282,7 @@ func checkUnknownKeys(node *yaml.Node, prefix string) []string {
 
 		case "agent":
 			if _, ok := knownKeys["agent"][key]; !ok {
-				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'agent:' — valid: interval, interface, vip_interface, vhid, state_file", keyNode.Line, key))
+				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'agent:' — valid: interval, interface, vip_interface, vhid, state_file, recovery_confirm", keyNode.Line, key))
 			}
 
 		case "health":

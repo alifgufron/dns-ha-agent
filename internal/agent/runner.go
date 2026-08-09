@@ -30,9 +30,9 @@ type Runner struct {
 
 	preemptCooldown    time.Time
 	kernelPreemptSince time.Time // when we started waiting for a peer's kernel preempt
+	recoveryStreak     int       // consecutive fully-healthy checks while holding the VIP down
 
-	lastPeerOK    map[string]bool
-	peerDownCount map[string]int
+	peers *peerTracker
 
 	peerSrv  *peer.HeartbeatServer
 	notifier *notify.EventDispatcher
@@ -290,6 +290,25 @@ func (r *Runner) runOnce() {
 	policyMode := ParsePolicyMode(cfg.Policy.Mode)
 	decision := EvaluatePolicy(policyMode, healthResult.Score, carpState, peerHealths, demotionLevels(cfg))
 
+	// Hold back a recovering node until it proves it is fully healthy, so the
+	// VIP is not handed to a node whose DNS has only partially come back.
+	recoveryConfirm := cfg.Agent.RecoveryConfirm
+	if recoveryConfirm == 0 {
+		recoveryConfirm = DefaultRecoveryConfirm
+	}
+	var recoveryHeld bool
+	decision, r.recoveryStreak, recoveryHeld = applyRecoveryHold(
+		policyMode, decision, r.lastIfaceDown,
+		healthResult.RawScore, healthResult.MaxScore,
+		recoveryConfirm, r.recoveryStreak, demotionLevels(cfg),
+	)
+	if recoveryHeld {
+		// The node is not serving: report it as UNHEALTHY so the recovery
+		// email arrives when the VIP is actually reclaimed, not while waiting.
+		currentState = StateUnhealthy
+		stateChanged = currentState.Transitioned(r.lastState)
+	}
+
 	vipIface := r.cfg.Agent.VIPInterface
 
 	// Step 1: Interface up/down with correct demotion ordering.
@@ -505,55 +524,47 @@ func (r *Runner) runOnce() {
 	}
 
 	if r.cfg.Peer.Enabled {
-		if r.lastPeerOK == nil {
-			r.lastPeerOK = make(map[string]bool)
-			r.peerDownCount = make(map[string]int)
+		if r.peers == nil {
+			r.peers = newPeerTracker(peerDownThreshold)
 		}
 
 		nodeIP, _ := carp.GetNodeIP(r.cfg.Agent.Interface)
 
 		for _, ph := range peerHealths {
-			wasOK, seen := r.lastPeerOK[ph.IP]
-			r.lastPeerOK[ph.IP] = ph.OK
+			wentDown, cameUp := r.peers.Update(ph.IP, ph.OK)
 
-			if !ph.OK {
-				r.peerDownCount[ph.IP]++
-				if seen && wasOK && r.peerDownCount[ph.IP] >= peerDownThreshold {
-					r.log.Warn("[PEER] peer declared DOWN",
-						"peer", ph.Name,
-						"ip", ph.IP,
-						"consecutive_failures", r.peerDownCount[ph.IP],
-					)
-					r.notifier.DispatchPeer(
-						"DOWN (unreachable)",
-						ph.Name,
-						ph.IP,
-						ph.Error,
-						healthResult.Score,
-						currentState.String(),
-						notificationCarp.String(),
-						nodeIP,
-					)
-					r.peerDownCount[ph.IP] = 0
-				}
-			} else {
-				r.peerDownCount[ph.IP] = 0
-				if seen && !wasOK {
-					r.log.Info("[PEER] peer recovered",
-						"peer", ph.Name,
-						"ip", ph.IP,
-					)
-					r.notifier.DispatchPeer(
-						"UP (recovered)",
-						ph.Name,
-						ph.IP,
-						"",
-						healthResult.Score,
-						currentState.String(),
-						notificationCarp.String(),
-						nodeIP,
-					)
-				}
+			switch {
+			case wentDown:
+				r.log.Warn("[PEER] peer declared DOWN",
+					"peer", ph.Name,
+					"ip", ph.IP,
+					"consecutive_failures", peerDownThreshold,
+				)
+				r.notifier.DispatchPeer(
+					"DOWN (unreachable)",
+					ph.Name,
+					ph.IP,
+					ph.Error,
+					healthResult.Score,
+					currentState.String(),
+					notificationCarp.String(),
+					nodeIP,
+				)
+			case cameUp:
+				r.log.Info("[PEER] peer recovered",
+					"peer", ph.Name,
+					"ip", ph.IP,
+				)
+				r.notifier.DispatchPeer(
+					"UP (recovered)",
+					ph.Name,
+					ph.IP,
+					"",
+					healthResult.Score,
+					currentState.String(),
+					notificationCarp.String(),
+					nodeIP,
+				)
 			}
 		}
 	}

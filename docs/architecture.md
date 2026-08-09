@@ -58,6 +58,7 @@ effective ≥ 255 → never MASTER
 2. **Read CARP state** — `ifconfig <vip_iface>` → MASTER/BACKUP
 3. **Peer check** — HTTP `/health` per peer → score, carp_state, advskew, demotion, preempt. Optional: pairwise token, TLS; ICMP ping on failure (host vs service classification)
 4. **Policy (preempt)** — UNHEALTHY→demotion 255 + iface DOWN · DEGRADED→demotion 50 · HEALTHY→demotion 0
+4b. **Recovery hold** (preempt only) — a node whose iface is DOWN keeps the unhealthy posture (demotion 255 + iface down) until `raw_score == max_score` for `agent.recovery_confirm` consecutive intervals, so a half-recovered node cannot reclaim the VIP. Holding demotion (not just the interface) stops healthy peers stepping down for it
 5. **Apply demotion + interface** — critical ordering:
    - DOWN: SetDemotion(target) first, then iface down (kernel adds 240)
    - UP: iface up first (kernel subtracts 240), then SetDemotion(target)

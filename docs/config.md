@@ -11,6 +11,7 @@ agent:
   interface: "vtnet0"          # management — for node IP and peer comms
   vip_interface: "vtnet1"      # VIP/CARP — controlled up/down to trigger failover
   vhid: 1
+  recovery_confirm: 5          # stable checks required before reclaiming the VIP
   state_file: "/var/db/dns-ha-agent.state"
 
 health:
@@ -85,6 +86,7 @@ notify:
 | `agent.interface` | Management interface — node IP, peer comms. Always UP. Typically `vtnet0` |
 | `agent.vip_interface` | VIP/CARP interface — **UP** healthy, **DOWN** unhealthy (triggers failover). Typically `vtnet1` |
 | `agent.vhid` | CARP VHID, must match `/etc/rc.conf` |
+| `agent.recovery_confirm` | **Preempt mode only.** Consecutive intervals a recovered node must be *fully* healthy (every enabled check passing) before it reclaims the VIP. Default `3`. `0` disables the wait. See usage.md → "Recovery confirmation" |
 | `agent.state_file` | Optional. Persists last state so a restart resumes cleanly (no stale-transition emails) |
 | `health.process_check` | Check DNS process(es) via pgrep. Uses `process_names` |
 | `health.process_names` | **List** of processes for `pgrep -x`. All must be alive. `["dnsdist"]`, `["named"]`, `["dnsdist","named"]`. Legacy single `process_name` also accepted |

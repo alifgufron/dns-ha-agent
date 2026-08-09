@@ -11,6 +11,7 @@ agent:
   interface: "vtnet0"                  # management interface — for node IP and peer communication
   vip_interface: "vtnet1"              # VIP/CARP interface — agent brings it DOWN on unhealthy (triggers failover)
   vhid: 1                              # CARP VHID — must match /etc/rc.conf
+  recovery_confirm: 5                  # preempt only: consecutive FULLY healthy checks (all checks passing) before reclaiming the VIP. Default 3
   state_file: "/var/db/dns-ha-agent.state"  # optional — persists last state across restarts
 
 health:

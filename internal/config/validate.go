@@ -22,6 +22,9 @@ func Validate(cfg *Config) error {
 	if cfg.Agent.VIPInterface == "" {
 		errs = append(errs, errors.New("agent.vip_interface is required"))
 	}
+	if cfg.Agent.RecoveryConfirm < 0 {
+		errs = append(errs, fmt.Errorf("agent.recovery_confirm must be >= 0, got %d", cfg.Agent.RecoveryConfirm))
+	}
 
 	if cfg.Health.DNSQuery.Enabled {
 		if cfg.Health.DNSQuery.Domain == "" {

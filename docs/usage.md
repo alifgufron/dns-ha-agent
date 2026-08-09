@@ -238,11 +238,49 @@ health:
 |----------|----------------|------------------|--------|
 | Both healthy | MASTER | BACKUP | **N1 MASTER** |
 | N1 crash | `vtnet1 DOWN` | MASTER | **N2 MASTER** (link down) |
-| N1 recovers | UP → BACKUP | MASTER → step down | **N1 MASTER** (preempt) |
+| N1 recovers | hold → UP → BACKUP | MASTER → step down | **N1 MASTER** (preempt, after recovery confirmation) |
 | N2 crash | MASTER | `vtnet1 DOWN` | **N1 MASTER** |
-| N2 recovers | MASTER | UP → BACKUP | **N1 stays MASTER** |
+| N2 recovers | MASTER | hold → UP → BACKUP | **N1 stays MASTER** |
 | Both crash | `DOWN` | `DOWN` | **No MASTER** |
 | N1 total failure | — | MASTER | **N2 MASTER** (timeout) |
+
+### Recovery confirmation
+
+A node coming back does **not** reclaim the VIP the moment one check passes.
+It keeps its VIP interface down until every enabled check has passed for
+`agent.recovery_confirm` consecutive intervals (default `3`):
+
+```yaml
+agent:
+  recovery_confirm: 5      # 5 × interval — with interval 5s, ~25s of proven health
+```
+
+Why it exists: when `dnsdist` restarts, the process is alive seconds before
+:53 actually answers. Without the wait the agent brought the interface straight
+back up, and a kernel with `net.inet.carp.preempt=1` (or plain CARP priority)
+handed the VIP back at score 25/100 — the node then flapped between DEGRADED and
+HEALTHY while serving as MASTER.
+
+Log line while waiting:
+
+```
+[CHECK HEALTH] ... state=UNHEALTHY decision=recovery-hold — 2/5 stable checks (score 75/100), demotion 255, vip_iface down
+```
+
+Notes:
+
+- **Any** failed check resets the counter — a flapping node never creeps up to
+  the threshold.
+- While held, the node keeps demotion at the unhealthy level (255), not just the
+  interface down. This is deliberate: peers decide to step down by comparing
+  effective advskew (`advskew + demotion`), so a held node advertising demotion 0
+  would make the healthy MASTER stand down for a node not ready to serve —
+  leaving the VIP owned by nobody for a moment.
+- The node reports `UNHEALTHY` while waiting, so the recovery email arrives when
+  the VIP is genuinely reclaimed, not while it is still confirming.
+- Only applies to `policy.mode: preempt`. Sticky never reclaims, so it is not
+  held back. Failover (going down) is never delayed — only coming back is.
+- `recovery_confirm: 0` disables the wait entirely (old behaviour).
 
 ---
 
