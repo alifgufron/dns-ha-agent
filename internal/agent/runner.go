@@ -465,25 +465,27 @@ func (r *Runner) runOnce() {
 	}
 	notificationCarp = carpState
 
-	// Step 4: Predict final CARP state for notification
-	// When HEALTHY with interface UP and currently BACKUP, but our effective
-	// advskew is lower than ALL healthy peers, we WILL become MASTER
-	// (either immediately via CARP timeout, or after peer steps down via preempt).
-	if currentState == StateHealthy && notificationCarp == carp.StateBackup {
+	// Step 4: Predict final CARP state for notification (preempt mode only).
+	// When HEALTHY with interface UP and currently BACKUP, we WILL become
+	// MASTER only if our effective advskew is strictly lower than every
+	// healthy peer's. A peer with equal or lower effective keeps the role:
+	// the agent steps down only when a peer has strictly lower effective
+	// (see step 2), and with equal values the kernel keeps the current master.
+	// Sticky mode never preempts, so it is skipped — predicting MASTER there
+	// would report a state the agent never drives (e.g. a healthy sticky MASTER
+	// peer with a lower-priority advskew stays MASTER).
+	if policyMode == PolicyPreempt && currentState == StateHealthy && notificationCarp == carp.StateBackup {
 		localAdvskew, err := carp.GetAdvskew(r.cfg.Agent.VIPInterface, r.cfg.Agent.VHID)
 		if err == nil {
 			myEffective := localAdvskew + actualDemotion
-			peerHasHigherPriority := false
+			willBeMaster := true
 			for _, ph := range peerHealths {
-				if ph.OK && ph.Score >= 80 {
-					peerEffective := ph.Advskew + ph.Demotion
-					if peerEffective < myEffective {
-						peerHasHigherPriority = true
-						break
-					}
+				if ph.OK && ph.Score >= 80 && (ph.Advskew+ph.Demotion) <= myEffective {
+					willBeMaster = false
+					break
 				}
 			}
-			if !peerHasHigherPriority {
+			if willBeMaster {
 				notificationCarp = carp.StateMaster
 			}
 		}
