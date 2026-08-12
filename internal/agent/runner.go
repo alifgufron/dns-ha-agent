@@ -283,8 +283,14 @@ func (r *Runner) runOnce() {
 		for _, p := range cfg.Peer.Peers {
 			entries = append(entries, peer.PeerEntry{IP: p.IP, Name: p.Name, Token: cfg.Peer.TokenFor(p)})
 		}
-		peerPort := cfg.Peer.PortNum()
-		peerHealths = peer.CheckAllPeers(entries, peerPort, 3*time.Second, cfg.Peer.Ping, cfg.Peer.TLS.Enabled)
+		peerHealths = peer.CheckAllPeers(entries, peer.CheckOptions{
+			Port:      cfg.Peer.PortNum(),
+			Timeout:   3 * time.Second,
+			Ping:      cfg.Peer.Ping,
+			TLS:       cfg.Peer.TLS.Enabled,
+			DNSPort:   cfg.Peer.DNSPort,
+			DNSDomain: cfg.Health.DNSQuery.Domain,
+		})
 	}
 
 	policyMode := ParsePolicyMode(cfg.Policy.Mode)
@@ -533,7 +539,27 @@ func (r *Runner) runOnce() {
 		nodeIP, _ := carp.GetNodeIP(r.cfg.Agent.Interface)
 
 		for _, ph := range peerHealths {
+			if ph.OK && ph.Carp != "" {
+				r.peers.rememberCarp(ph.IP, ph.Carp)
+			}
+
 			wentDown, cameUp := r.peers.Update(ph.IP, ph.OK)
+
+			// Classify why the heartbeat failed. "DOWN (unreachable)" becomes
+			// the old one-size-fits-all status; the probe result decides
+			// between host-down, agent-only, and critical DNS outage.
+			status := ph.Severity.String()
+			if ph.Severity == peer.SeverityNone {
+				status = "DOWN (unreachable)"
+			}
+
+			info := notify.PeerProbeInfo{
+				Diagnosis:  ph.Diagnosis,
+				LastCarp:   r.peers.LastCarp(ph.IP),
+				AgentProbe: ph.AgentProbe.String(),
+				TCP53:      ph.TCP53.String(),
+				UDP53:      udpProbeString(ph.UDP53OK),
+			}
 
 			switch {
 			case wentDown:
@@ -541,9 +567,11 @@ func (r *Runner) runOnce() {
 					"peer", ph.Name,
 					"ip", ph.IP,
 					"consecutive_failures", peerDownThreshold,
+					"status", status,
+					"diagnosis", ph.Diagnosis,
 				)
 				r.notifier.DispatchPeer(
-					"DOWN (unreachable)",
+					status,
 					ph.Name,
 					ph.IP,
 					ph.Error,
@@ -551,6 +579,7 @@ func (r *Runner) runOnce() {
 					currentState.String(),
 					notificationCarp.String(),
 					nodeIP,
+					info,
 				)
 			case cameUp:
 				r.log.Info("[PEER] peer recovered",
@@ -566,6 +595,23 @@ func (r *Runner) runOnce() {
 					currentState.String(),
 					notificationCarp.String(),
 					nodeIP,
+					notify.PeerProbeInfo{},
+				)
+			case !ph.OK && ph.Severity == peer.SeverityCritical:
+				// A VIP held by a node that no longer answers DNS needs a human.
+				// The tracker fires the initial alert once, so re-fire here every
+				// cooldown period until the peer is reachable again — the shared
+				// "peer:IP:<status>" key is what rate-limits it.
+				r.notifier.DispatchPeer(
+					status,
+					ph.Name,
+					ph.IP,
+					ph.Error,
+					healthResult.Score,
+					currentState.String(),
+					notificationCarp.String(),
+					nodeIP,
+					info,
 				)
 			}
 		}
@@ -627,6 +673,14 @@ func (r *Runner) runOnce() {
 	if currentState == StateHealthy {
 		r.wasMaster = notificationCarp == carp.StateMaster
 	}
+}
+
+// udpProbeString renders the UDP :53 result for the notification detail block.
+func udpProbeString(ok bool) string {
+	if ok {
+		return "✓ answering DNS queries"
+	}
+	return "✗ not answering DNS queries"
 }
 
 type httpServer struct {

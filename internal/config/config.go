@@ -83,6 +83,10 @@ type PeerConfig struct {
 	Ping    bool            `yaml:"ping"`
 	TLS     TLSServerConfig `yaml:"tls"`
 	Peers   []PeerEntry     `yaml:"peers"`
+	// DNSPort is the peer's DNS port, probed only when a heartbeat fails, to
+	// tell "agent is down" apart from "the peer stopped serving DNS".
+	// Empty means 53.
+	DNSPort string `yaml:"dns_port"`
 }
 
 type TLSServerConfig struct {
@@ -162,7 +166,7 @@ var knownKeys = map[string]map[string]bool{
 	"log_level": {},
 	"health":    {"process_check": true, "process_name": true, "process_names": true, "tcp_check": true, "udp_check": true, "dns_query": true, "bind_address": true, "weights": true},
 	"carp":      {"demotion_healthy": true, "demotion_degraded": true, "demotion_unhealthy": true},
-	"peer":      {"enabled": true, "bind": true, "port": true, "token": true, "ping": true, "tls": true, "peers": true},
+	"peer":      {"enabled": true, "bind": true, "port": true, "token": true, "ping": true, "tls": true, "peers": true, "dns_port": true},
 	"policy":    {"mode": true},
 	// master_loss_alert is the pre-rename name of vip_loss_alert, still accepted
 	// so an already-installed config keeps working after an upgrade.
@@ -301,7 +305,7 @@ func checkUnknownKeys(node *yaml.Node, prefix string) []string {
 
 		case "peer":
 			if _, ok := knownKeys["peer"][key]; !ok {
-				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'peer:' — valid: enabled, bind, port, token, ping, tls, peers", keyNode.Line, key))
+				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'peer:' — valid: enabled, bind, port, token, ping, tls, peers, dns_port", keyNode.Line, key))
 			} else if key == "peers" && valNode.Kind == yaml.SequenceNode {
 				errs = append(errs, checkPeerEntries(valNode)...)
 			} else if key == "tls" && valNode.Kind == yaml.MappingNode {

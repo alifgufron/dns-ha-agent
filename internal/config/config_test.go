@@ -54,6 +54,7 @@ func TestValidateErrors(t *testing.T) {
 		{"missing token", func(c *Config) { c.Peer.Token = "" }, "peer.token"},
 		{"bad peer bind", func(c *Config) { c.Peer.Bind = "not-an-ip" }, "peer.bind"},
 		{"bad peer port format", func(c *Config) { c.Peer.Port = "8845" }, "peer.port"},
+		{"bad peer dns_port", func(c *Config) { c.Peer.DNSPort = "notaport" }, "peer.dns_port"},
 		{"bad peer ip", func(c *Config) { c.Peer.Peers = []PeerEntry{{IP: "xyz", Name: "n"}} }, "peer.peers[0].ip"},
 		{"tls missing cert", func(c *Config) { c.Peer.TLS = TLSServerConfig{Enabled: true, KeyFile: "k"} }, "peer.tls.cert_file"},
 		{"tls missing key", func(c *Config) { c.Peer.TLS = TLSServerConfig{Enabled: true, CertFile: "c"} }, "peer.tls.key_file"},

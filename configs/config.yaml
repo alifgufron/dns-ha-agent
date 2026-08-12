@@ -44,6 +44,7 @@ peer:
   port: ":8845"                        # MUST be identical on all nodes
   token: "${HA_TOKEN}"                 # shared secret — MUST be identical on all nodes
   ping: false                          # ICMP check to peer on heartbeat failure — distinguishes "VM dead" vs "service down" in alerts
+  dns_port: "53"                       # peer's DNS port, probed (TCP+UDP) only when the heartbeat fails — tells "agent down" from "DNS stopped serving". Default 53
   tls:                                 # optional — TLS for peer HTTP
     enabled: false
     cert_file: "/usr/local/etc/dns-ha-agent.crt"

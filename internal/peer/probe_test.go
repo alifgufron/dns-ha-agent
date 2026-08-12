@@ -1,0 +1,92 @@
+package peer
+
+import (
+	"context"
+	"net"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// classifyHTTPError must tell "nothing is listening" (refused) apart from
+// "accepted but never answered" (a hung userland). Collapsing the two is what
+// made a hang look like an ordinary unreachable peer.
+func TestClassifyHTTPError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want Probe
+	}{
+		{"nil", nil, ProbeOK},
+		{"refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, ProbeRefused},
+		{"dial timeout", &net.OpError{Op: "dial", Err: context.DeadlineExceeded}, ProbeUnreachable},
+		{"dial host unreachable", &net.OpError{Op: "dial", Err: syscall.EHOSTUNREACH}, ProbeUnreachable},
+		{"timeout after connect", &net.OpError{Op: "read", Err: context.DeadlineExceeded}, ProbeNoAnswer},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := classifyHTTPError(c.err); got != c.want {
+				t.Errorf("classifyHTTPError(%v) = %v, want %v", c.err, got, c.want)
+			}
+		})
+	}
+}
+
+// Diagnose must rank a host that answers NOTHING as down, and a host whose DNS
+// is silent while the kernel answers as critical — the exact hang scenario.
+func TestDiagnose(t *testing.T) {
+	cases := []struct {
+		name     string
+		agent    Probe
+		tcp53    Probe
+		udp53    bool
+		wantSev  Severity
+		wantHang bool
+	}{
+		{"host down — nothing answers", ProbeUnreachable, ProbeUnreachable, false, SeverityHostDown, false},
+		{"agent down, DNS serving", ProbeRefused, ProbeOK, true, SeverityAgentOnly, false},
+		{"agent hung, DNS serving", ProbeNoAnswer, ProbeOK, true, SeverityAgentOnly, false},
+		{"agent hung, DNS dead", ProbeNoAnswer, ProbeRefused, false, SeverityCritical, true},
+		{"agent and DNS both dead", ProbeRefused, ProbeRefused, false, SeverityCritical, false},
+		{"agent dead, DNS tcp only", ProbeRefused, ProbeOK, false, SeverityCritical, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sev, diag := Diagnose(c.agent, c.tcp53, c.udp53)
+			if sev != c.wantSev {
+				t.Errorf("Diagnose severity = %v, want %v", sev, c.wantSev)
+			}
+			if c.wantHang && !contains(diag, "HUNG") {
+				t.Errorf("expected a hang diagnosis, got %q", diag)
+			}
+		})
+	}
+}
+
+// A TCP handshake that fails with ECONNREFUSED must stay refused, and a
+// successful dial must stay OK — probeTCP is what the DNS probe rests on.
+func TestProbeTCP(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	if got := probeTCP(ln.Addr().String(), time.Second); got != ProbeOK {
+		t.Errorf("listening socket = %v, want OK", got)
+	}
+	if got := probeTCP("127.0.0.1:1", time.Second); got != ProbeRefused {
+		t.Errorf("closed port = %v, want Refused", got)
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (func() bool {
+		for i := 0; i+len(sub) <= len(s); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
+			}
+		}
+		return false
+	})()
+}

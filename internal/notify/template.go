@@ -218,15 +218,43 @@ Score:     {{.LocalScore}}/100
 CARP:      {{.LocalCarp}}
 
 ── Peer ({{.PeerName}}) ──
-Peer IP:   {{.PeerIP}}
-Status:    {{.Status}}
-Error:     {{.Error}}
-
+Peer IP:      {{.PeerIP}}
+Status:       {{.Status}}
+{{if .Diagnosis}}Diagnosis:    {{.Diagnosis}}
+{{end}}{{if .LastCarp}}Last CARP:    {{.LastCarp}}
+{{end}}{{if .Probes}}Probes:{{.Probes}}
+{{end}}{{if .Error}}Error:        {{.Error}}
+{{end}}
 Recent CARP/ARP messages from /var/log/messages:
 {{.CarpArpLog}}
 
 This is an automated notification from dns-ha-agent.
 `
+
+// PeerProbeInfo carries the fallback probe results that explain WHY a peer's
+// heartbeat failed. Plain strings keep the notify package independent of the
+// peer package.
+type PeerProbeInfo struct {
+	Diagnosis  string // human conclusion: hung, host down, agent down, ...
+	LastCarp   string // CARP state the peer last reported while healthy
+	AgentProbe string // agent heartbeat port probe result
+	TCP53      string // TCP :53 probe result
+	UDP53      string // UDP :53 (DNS query) probe result
+}
+
+// formatProbes renders the probe detail block, omitting probes that never ran.
+func formatProbes(info PeerProbeInfo) string {
+	var b strings.Builder
+	write := func(label, v string) {
+		if v != "" {
+			b.WriteString("\n" + label + v)
+		}
+	}
+	write("Agent HTTP:  ", info.AgentProbe)
+	write("TCP :53:     ", info.TCP53)
+	write("UDP :53:     ", info.UDP53)
+	return b.String()
+}
 
 type PeerNotificationData struct {
 	Timestamp  string
@@ -239,10 +267,13 @@ type PeerNotificationData struct {
 	PeerIP     string
 	Status     string
 	Error      string
+	Diagnosis  string
+	LastCarp   string
+	Probes     string
 	CarpArpLog string
 }
 
-func RenderPeerNotification(status, peerName, peerIP, errorMsg string, localScore int, localState, localCarp, nodeIP string) (string, string) {
+func RenderPeerNotification(status, peerName, peerIP, errorMsg string, localScore int, localState, localCarp, nodeIP string, info PeerProbeInfo) (string, string) {
 	hostname, _ := os.Hostname()
 
 	data := PeerNotificationData{
@@ -256,6 +287,9 @@ func RenderPeerNotification(status, peerName, peerIP, errorMsg string, localScor
 		PeerIP:     peerIP,
 		Status:     status,
 		Error:      errorMsg,
+		Diagnosis:  info.Diagnosis,
+		LastCarp:   info.LastCarp,
+		Probes:     formatProbes(info),
 		CarpArpLog: getCarpArpLog(),
 	}
 

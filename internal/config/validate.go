@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -95,6 +96,12 @@ func Validate(cfg *Config) error {
 			errs = append(errs, errors.New("peer.port is required when enabled"))
 		} else if !strings.HasPrefix(cfg.Peer.Port, ":") {
 			errs = append(errs, fmt.Errorf("peer.port %q must start with ':' (e.g. \":8845\")", cfg.Peer.Port))
+		}
+
+		if cfg.Peer.DNSPort != "" {
+			if port, err := strconv.Atoi(cfg.Peer.DNSPort); err != nil || port < 1 || port > 65535 {
+				errs = append(errs, fmt.Errorf("peer.dns_port %q is not a valid port number", cfg.Peer.DNSPort))
+			}
 		}
 
 		// port and token must be same on all nodes (documentation note, validated per-node)

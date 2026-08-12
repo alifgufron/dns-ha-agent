@@ -13,6 +13,7 @@ package agent
 type peerTracker struct {
 	lastOK    map[string]bool
 	downCount map[string]int
+	lastCarp  map[string]string // CARP state the peer last reported while healthy
 	threshold int
 }
 
@@ -23,8 +24,29 @@ func newPeerTracker(threshold int) *peerTracker {
 	return &peerTracker{
 		lastOK:    make(map[string]bool),
 		downCount: make(map[string]int),
+		lastCarp:  make(map[string]string),
 		threshold: threshold,
 	}
+}
+
+// rememberCarp records the CARP state a healthy peer reported, so an alert
+// fired while it is unreachable can say whether it holds the VIP.
+func (t *peerTracker) rememberCarp(ip, carp string) {
+	if carp != "" {
+		t.lastCarp[ip] = carp
+	}
+}
+
+// LastCarp returns the CARP state the peer last reported while healthy.
+func (t *peerTracker) LastCarp(ip string) string {
+	return t.lastCarp[ip]
+}
+
+// KnownDown reports whether the peer is in a confirmed-down state, i.e. its
+// failure streak has crossed the threshold at least once.
+func (t *peerTracker) KnownDown(ip string) bool {
+	ok, seen := t.lastOK[ip]
+	return seen && !ok
 }
 
 // Update records the result of one poll and reports which alert, if any, should

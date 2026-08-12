@@ -5,11 +5,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
+	"github.com/alifgufron/dns-ha-agent/internal/health"
 	"github.com/alifgufron/dns-ha-agent/internal/util"
 )
+
+// CheckOptions carries everything a peer check needs beyond the peer identity.
+type CheckOptions struct {
+	Port      string // agent heartbeat port, without a leading colon
+	Timeout   time.Duration
+	Ping      bool
+	TLS       bool
+	DNSPort   string // peer DNS port for the fallback probe
+	DNSDomain string // domain used by the fallback UDP query
+}
+
+func (o CheckOptions) dnsPort() string {
+	if o.DNSPort == "" {
+		return "53"
+	}
+	return o.DNSPort
+}
 
 func peerStateFromScore(score int) string {
 	if score >= 80 {
@@ -40,18 +59,29 @@ type PeerHealth struct {
 	OK       bool      `json:"ok"`
 	Error    string    `json:"error,omitempty"`
 	Updated  time.Time `json:"updated"`
+
+	// Fallback probes, filled only when the heartbeat fails. They answer the
+	// question the heartbeat cannot: is the peer still serving DNS, and is it
+	// dead or merely hung?
+	AgentProbe Probe    `json:"agent_probe"`
+	TCP53      Probe    `json:"tcp53"`
+	UDP53OK    bool     `json:"udp53_ok"`
+	Severity   Severity `json:"severity"`
+	Diagnosis  string   `json:"diagnosis,omitempty"`
 }
 
-func CheckPeer(ip, name, token, port string, timeout time.Duration, pingEnabled, tlsEnabled bool) PeerHealth {
+func CheckPeer(ip, name, token string, opts CheckOptions) PeerHealth {
 	ph := PeerHealth{
 		Name:    name,
 		IP:      ip,
 		Updated: time.Now(),
 	}
 
+	timeout := opts.Timeout
+
 	scheme := "http"
 	transport := http.DefaultTransport
-	if tlsEnabled {
+	if opts.TLS {
 		scheme = "https"
 		// The shared token is the authenticator, not the certificate.
 		transport = &http.Transport{
@@ -62,8 +92,8 @@ func CheckPeer(ip, name, token, port string, timeout time.Duration, pingEnabled,
 	client := &http.Client{Timeout: timeout, Transport: transport}
 
 	u := fmt.Sprintf("%s://%s/health", scheme, ip)
-	if port != "" {
-		u = fmt.Sprintf("%s://%s:%s/health", scheme, ip, port)
+	if opts.Port != "" {
+		u = fmt.Sprintf("%s://%s:%s/health", scheme, ip, opts.Port)
 	}
 
 	req, err := http.NewRequest("GET", u, nil)
@@ -75,17 +105,18 @@ func CheckPeer(ip, name, token, port string, timeout time.Duration, pingEnabled,
 
 	resp, err := client.Do(req)
 	if err != nil {
-		// Heartbeat failed — distinguish host-down vs service-down via ping
-		if pingEnabled {
+		// Heartbeat failed. Probe the DNS service directly: an unreachable
+		// agent says nothing about whether clients are still being served,
+		// and that distinction decides whether this needs waking someone up.
+		ph.AgentProbe = classifyHTTPError(err)
+		if opts.Ping {
 			ph.PingOK = util.PingHost(ip, timeout)
-			if ph.PingOK {
-				ph.Error = fmt.Sprintf("peer HTTP unreachable (host UP, agent/service DOWN): %v", err)
-			} else {
-				ph.Error = fmt.Sprintf("peer UNREACHABLE — no ICMP reply (host DOWN or RTO): %v", err)
-			}
-		} else {
-			ph.Error = fmt.Sprintf("connection failed: %v", err)
 		}
+		dnsAddr := net.JoinHostPort(ip, opts.dnsPort())
+		ph.TCP53 = probeTCP(dnsAddr, timeout)
+		ph.UDP53OK = health.CheckUDP(dnsAddr, opts.DNSDomain, timeout)
+		ph.Severity, ph.Diagnosis = Diagnose(ph.AgentProbe, ph.TCP53, ph.UDP53OK)
+		ph.Error = fmt.Sprintf("%s: %v", ph.Diagnosis, err)
 		return ph
 	}
 	defer resp.Body.Close()
@@ -121,11 +152,10 @@ func CheckPeer(ip, name, token, port string, timeout time.Duration, pingEnabled,
 	return ph
 }
 
-func CheckAllPeers(peers []PeerEntry, port string, timeout time.Duration, pingEnabled, tlsEnabled bool) []PeerHealth {
+func CheckAllPeers(peers []PeerEntry, opts CheckOptions) []PeerHealth {
 	results := make([]PeerHealth, 0, len(peers))
 	for _, p := range peers {
-		ph := CheckPeer(p.IP, p.Name, p.Token, port, timeout, pingEnabled, tlsEnabled)
-		results = append(results, ph)
+		results = append(results, CheckPeer(p.IP, p.Name, p.Token, opts))
 	}
 	return results
 }
