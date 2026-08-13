@@ -151,5 +151,9 @@ func Validate(cfg *Config) error {
 		errs = append(errs, errors.New("notify.cooldown must be positive"))
 	}
 
+	if cfg.Notify.Confirm < 0 {
+		errs = append(errs, fmt.Errorf("notify.confirm must be >= 0 (0 = default), got %d", cfg.Notify.Confirm))
+	}
+
 	return errors.Join(errs...)
 }

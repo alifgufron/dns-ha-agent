@@ -128,6 +128,11 @@ type NotifyConfig struct {
 	Slack    SlackConfig    `yaml:"slack"`
 	Telegram TelegramConfig `yaml:"telegram"`
 	Cooldown time.Duration  `yaml:"cooldown"`
+	// Confirm is how many consecutive cycles a state must hold before a
+	// state-change notification is sent. It debounces transient dips without
+	// delaying the actual failover, which is driven by the CARP decision.
+	// Zero means "unset" and falls back to DefaultNotifyConfirm.
+	Confirm int `yaml:"confirm"`
 	// VIPLossAlert warns when this node loses the VIP with no peer entitled to
 	// take it. Role-neutral by design: every node runs the same config and
 	// watches only its own VIP, whichever role it happens to hold.
@@ -170,7 +175,7 @@ var knownKeys = map[string]map[string]bool{
 	"policy":    {"mode": true},
 	// master_loss_alert is the pre-rename name of vip_loss_alert, still accepted
 	// so an already-installed config keeps working after an upgrade.
-	"notify": {"email": true, "slack": true, "telegram": true, "cooldown": true, "vip_loss_alert": true, "master_loss_alert": true},
+	"notify": {"email": true, "slack": true, "telegram": true, "cooldown": true, "confirm": true, "vip_loss_alert": true, "master_loss_alert": true},
 }
 
 var nestedKeys = map[string]map[string]bool{
@@ -319,7 +324,7 @@ func checkUnknownKeys(node *yaml.Node, prefix string) []string {
 
 		case "notify":
 			if _, ok := knownKeys["notify"][key]; !ok {
-				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'notify:' — valid: email, slack, telegram, cooldown, vip_loss_alert", keyNode.Line, key))
+				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'notify:' — valid: email, slack, telegram, cooldown, confirm, vip_loss_alert", keyNode.Line, key))
 			} else if key == "email" && valNode.Kind == yaml.MappingNode {
 				errs = append(errs, checkMappingKeys(valNode, "email")...)
 			} else if key == "slack" && valNode.Kind == yaml.MappingNode {

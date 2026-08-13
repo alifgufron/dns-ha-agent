@@ -73,4 +73,5 @@ notify:
     bot_token: "${TELEGRAM_TOKEN}"
     chat_id: "123456789"
   cooldown: 5m                         # anti-spam: min gap between alerts OF THE SAME KIND (per state transition / per peer / vip-loss), not a global mute
+  confirm: 3                           # optional — consecutive checks a state must hold before a state-change email fires. Debounces transient dips (e.g. process restart). Default 3
   vip_loss_alert: true                 # alert when this node loses the VIP with no peer entitled to take it (split-brain guard). Same on every node

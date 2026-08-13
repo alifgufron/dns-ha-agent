@@ -71,6 +71,7 @@ notify:
     bot_token: "${TELEGRAM_TOKEN}"
     chat_id: "123456789"
   cooldown: 5m
+  confirm: 3                        # consecutive cycles a state must hold before the email fires
   vip_loss_alert: true
 ```
 
@@ -111,6 +112,7 @@ notify:
 | `notify.slack` | Optional Slack webhook (`enabled`, `webhook_url`) |
 | `notify.telegram` | Optional Telegram bot (`enabled`, `bot_token`, `chat_id`) |
 | `notify.cooldown` | Minimum interval between notifications **of the same kind** (per-key: transition / `peer:<ip>:<status>` / `vip-loss`), not a global mute. Default `5m`. See usage.md |
+| `notify.confirm` | Consecutive cycles a state must hold before a state-change notification fires. Debounces transient dips (e.g. a restart showing score 25 for one cycle); **does not** delay failover, which the CARP decision drives immediately. Default `3` (≈10s at a 5s interval), `0` = default |
 | `notify.vip_loss_alert` | Alert if a node loses the VIP with no peer entitled to take it (split-brain guard). Role-neutral: same value on every node. Default `true`. (`master_loss_alert` still accepted as a legacy alias) |
 
 ---

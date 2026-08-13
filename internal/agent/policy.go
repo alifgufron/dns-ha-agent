@@ -90,6 +90,11 @@ func EvaluatePolicy(mode PolicyMode, score int, carpState carp.State, peerHealth
 // DefaultRecoveryConfirm is used when agent.recovery_confirm is unset.
 const DefaultRecoveryConfirm = 3
 
+// DefaultNotifyConfirm is used when notify.confirm is unset. 3 cycles at the
+// default 5s interval means a state-change email only goes out after ~10s of a
+// stable state, which filters transient dips without noticeable delay.
+const DefaultNotifyConfirm = 3
+
 // applyRecoveryHold delays reclaiming the VIP until a node that had its VIP
 // interface down has been FULLY healthy (every enabled check passing, i.e.
 // raw == max) for `confirm` consecutive intervals. It returns the decision to

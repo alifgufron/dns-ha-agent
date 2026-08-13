@@ -28,6 +28,12 @@ type Runner struct {
 	lastIfaceDown bool
 	wasMaster     bool
 
+	// Notification debounce: state-change emails only fire after the new state
+	// has held for notify.confirm consecutive cycles. Failover itself is never
+	// delayed by this — the CARP decision runs before the email is considered.
+	confirmState State
+	confirmCount int
+
 	preemptCooldown    time.Time
 	kernelPreemptSince time.Time // when we started waiting for a peer's kernel preempt
 	recoveryStreak     int       // consecutive fully-healthy checks while holding the VIP down
@@ -315,6 +321,24 @@ func (r *Runner) runOnce() {
 		stateChanged = currentState.Transitioned(r.lastState)
 	}
 
+	// Notification debounce bookkeeping. Count consecutive cycles spent in the
+	// current state; any change resets the streak. A state-change email fires
+	// only after the new state has held for cfg.Notify.Confirm cycles, so a
+	// transient dip (e.g. a score of 25 while the process restarts) is never
+	// reported. Failover is NOT affected — the CARP decision above is what
+	// moves the VIP, and it has already been computed by this point.
+	if currentState == r.confirmState {
+		r.confirmCount++
+	} else {
+		r.confirmState = currentState
+		r.confirmCount = 1
+	}
+	notifyConfirm := cfg.Notify.Confirm
+	if notifyConfirm == 0 {
+		notifyConfirm = DefaultNotifyConfirm
+	}
+	notifyReady := r.confirmCount >= notifyConfirm
+
 	vipIface := r.cfg.Agent.VIPInterface
 
 	// Step 1: Interface up/down with correct demotion ordering.
@@ -526,6 +550,12 @@ func (r *Runner) runOnce() {
 		} else {
 			r.log.Warn("[PEER] peer unreachable",
 				"peer", ph.Name,
+				"ping", ph.PingOK,
+				"http", ph.AgentProbe.String(),
+				"tcp53", ph.TCP53.String(),
+				"udp53", udpProbeString(ph.UDP53OK),
+				"severity", ph.Severity.String(),
+				"diagnosis", ph.Diagnosis,
 				"error", ph.Error,
 			)
 		}
@@ -539,7 +569,10 @@ func (r *Runner) runOnce() {
 		nodeIP, _ := carp.GetNodeIP(r.cfg.Agent.Interface)
 
 		for _, ph := range peerHealths {
-			if ph.OK && ph.Carp != "" {
+			// Carp is remembered whenever the heartbeat answered (even for an
+			// unhealthy but responding peer), so an outage email can always say
+			// what role the peer held before it stopped answering.
+			if ph.Carp != "" {
 				r.peers.rememberCarp(ph.IP, ph.Carp)
 			}
 
@@ -617,7 +650,7 @@ func (r *Runner) runOnce() {
 		}
 	}
 
-	if stateChanged {
+	if stateChanged && notifyReady {
 		nodeIP, _ := carp.GetNodeIP(cfg.Agent.Interface)
 		vip, _ := carp.GetVIP(cfg.Agent.VIPInterface, cfg.Agent.VHID)
 		r.notifier.Dispatch(

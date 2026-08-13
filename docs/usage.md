@@ -307,10 +307,24 @@ notify:
     bot_token: "${TELEGRAM_TOKEN}"
     chat_id: "123456789"     # negative for group/channel
   cooldown: 5m
+  confirm: 3                     # consecutive checks a state must hold before the email fires
   vip_loss_alert: true
 ```
 
 Emails include the predicted CARP state + the last 10 lines of `/var/log/messages` (`carp:`/`arp:`).
+
+### `confirm`
+
+A state-change email only fires after the new state has held for `confirm`
+consecutive checks (default `3` — with a 5s interval that is ~10s). It filters
+transient dips that resolve on their own, e.g. a `dnsdist` restart showing
+`UNHEALTHY` (score 25) for one cycle before coming back, which used to generate
+a false "UNHEALTHY" alert.
+
+**It never delays failover.** The CARP decision (interface up/down + demotion)
+runs on the first check of the new state; only the notification waits for
+confirmation. So `confirm` trades a slightly later email for accuracy, at no
+cost to availability.
 
 ### `cooldown`
 
@@ -334,6 +348,23 @@ during that window still alerts right away. Suppressed alerts are logged:
 
 Lower it for faster re-alerting, raise it on links that flap. The timer lives in
 memory, so a restart clears it.
+
+### Peer alerts
+
+When a peer's heartbeat fails, the agent probes it directly (ICMP ping, TCP 53,
+UDP 53) before alerting, and classifies the failure:
+
+| Status | Meaning |
+|--------|---------|
+| `DOWN (host unreachable)` | No ICMP reply and nothing answered on any port — VM down or network partition |
+| `DEGRADED (agent down, DNS serving)` | Agent/health endpoint down, but DNS still answers queries |
+| `CRITICAL (host up, DNS not serving)` | Host alive (ICMP or a probe answered) but DNS is gone — hung userland, or DNS down/filtered |
+
+The ICMP probe runs on every heartbeat failure — there is no switch to disable
+it. The email and the `[PEER] peer unreachable` log line both carry the
+per-probe detail (`ping`, `http`, `tcp53`, `udp53`) plus the last known CARP
+role the peer held, so a dead VM, a hung agent, and a stopped DNS server each
+get a distinct, accurate message instead of a generic "unreachable".
 
 ### `vip_loss_alert`
 

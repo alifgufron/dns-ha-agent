@@ -60,6 +60,7 @@ func TestValidateErrors(t *testing.T) {
 		{"tls missing key", func(c *Config) { c.Peer.TLS = TLSServerConfig{Enabled: true, CertFile: "c"} }, "peer.tls.key_file"},
 		{"bad policy mode", func(c *Config) { c.Policy.Mode = "bogus" }, "policy.mode"},
 		{"no cooldown", func(c *Config) { c.Notify.Cooldown = 0 }, "notify.cooldown"},
+		{"negative confirm", func(c *Config) { c.Notify.Confirm = -1 }, "notify.confirm"},
 		{"slack missing url", func(c *Config) { c.Notify.Slack = SlackConfig{Enabled: true} }, "slack.webhook_url"},
 		{"telegram missing token", func(c *Config) { c.Notify.Telegram = TelegramConfig{Enabled: true, ChatID: "1"} }, "telegram.bot_token"},
 		{"telegram missing chat", func(c *Config) { c.Notify.Telegram = TelegramConfig{Enabled: true, BotToken: "t"} }, "telegram.chat_id"},
