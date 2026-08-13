@@ -3,14 +3,20 @@ package peer
 import (
 	"context"
 	"net"
+	"net/url"
 	"syscall"
 	"testing"
 	"time"
 )
 
+func dialErr(err error) error { return &dialError{err} }
+
 // classifyHTTPError must tell "nothing is listening" (refused) apart from
 // "accepted but never answered" (a hung userland). Collapsing the two is what
-// made a hang look like an ordinary unreachable peer.
+// made a hang look like an ordinary unreachable peer. Dial failures arrive
+// wrapped in dialError by the custom transport — mirroring the real
+// http.Client chain (url.Error → dialError) for both the dead-host and the
+// hung-host paths.
 func TestClassifyHTTPError(t *testing.T) {
 	cases := []struct {
 		name string
@@ -18,10 +24,13 @@ func TestClassifyHTTPError(t *testing.T) {
 		want Probe
 	}{
 		{"nil", nil, ProbeOK},
-		{"refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, ProbeRefused},
-		{"dial timeout", &net.OpError{Op: "dial", Err: context.DeadlineExceeded}, ProbeUnreachable},
-		{"dial host unreachable", &net.OpError{Op: "dial", Err: syscall.EHOSTUNREACH}, ProbeUnreachable},
+		{"refused", dialErr(&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}), ProbeRefused},
+		{"dial timeout", dialErr(&net.OpError{Op: "dial", Err: context.DeadlineExceeded}), ProbeUnreachable},
+		{"dial host unreachable", dialErr(&net.OpError{Op: "dial", Err: syscall.EHOSTUNREACH}), ProbeUnreachable},
+		{"url dial timeout — host down", &url.Error{Op: "Get", URL: "http://x", Err: dialErr(&net.OpError{Op: "dial", Err: context.DeadlineExceeded})}, ProbeUnreachable},
+		{"url refused", &url.Error{Op: "Get", URL: "http://x", Err: dialErr(&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED})}, ProbeRefused},
 		{"timeout after connect", &net.OpError{Op: "read", Err: context.DeadlineExceeded}, ProbeNoAnswer},
+		{"url timeout after connect — hang", &url.Error{Op: "Get", URL: "http://x", Err: &net.OpError{Op: "read", Err: context.DeadlineExceeded}}, ProbeNoAnswer},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -35,24 +44,27 @@ func TestClassifyHTTPError(t *testing.T) {
 // Diagnose must rank a host that answers NOTHING as down, and a host whose DNS
 // is silent while the kernel answers as critical — the exact hang scenario.
 func TestDiagnose(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
 	cases := []struct {
 		name     string
 		agent    Probe
 		tcp53    Probe
 		udp53    bool
+		ping     *bool
 		wantSev  Severity
 		wantHang bool
 	}{
-		{"host down — nothing answers", ProbeUnreachable, ProbeUnreachable, false, SeverityHostDown, false},
-		{"agent down, DNS serving", ProbeRefused, ProbeOK, true, SeverityAgentOnly, false},
-		{"agent hung, DNS serving", ProbeNoAnswer, ProbeOK, true, SeverityAgentOnly, false},
-		{"agent hung, DNS dead", ProbeNoAnswer, ProbeRefused, false, SeverityCritical, true},
-		{"agent and DNS both dead", ProbeRefused, ProbeRefused, false, SeverityCritical, false},
-		{"agent dead, DNS tcp only", ProbeRefused, ProbeOK, false, SeverityCritical, false},
+		{"host down — nothing answers", ProbeUnreachable, ProbeUnreachable, false, boolPtr(false), SeverityHostDown, false},
+		{"host down but ICMP replies — critical", ProbeUnreachable, ProbeUnreachable, false, boolPtr(true), SeverityCritical, false},
+		{"agent down, DNS serving", ProbeRefused, ProbeOK, true, nil, SeverityAgentOnly, false},
+		{"agent hung, DNS serving", ProbeNoAnswer, ProbeOK, true, nil, SeverityAgentOnly, false},
+		{"agent hung, DNS dead", ProbeNoAnswer, ProbeRefused, false, nil, SeverityCritical, true},
+		{"agent and DNS both dead", ProbeRefused, ProbeRefused, false, nil, SeverityCritical, false},
+		{"agent dead, DNS tcp only", ProbeRefused, ProbeOK, false, nil, SeverityCritical, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sev, diag := Diagnose(c.agent, c.tcp53, c.udp53)
+			sev, diag := Diagnose(c.agent, c.tcp53, c.udp53, c.ping)
 			if sev != c.wantSev {
 				t.Errorf("Diagnose severity = %v, want %v", sev, c.wantSev)
 			}

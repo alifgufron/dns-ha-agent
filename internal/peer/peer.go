@@ -80,16 +80,20 @@ func CheckPeer(ip, name, token string, opts CheckOptions) PeerHealth {
 	timeout := opts.Timeout
 
 	scheme := "http"
-	transport := http.DefaultTransport
+	var transport *http.Transport
 	if opts.TLS {
 		scheme = "https"
 		// The shared token is the authenticator, not the certificate.
-		transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
+		transport = newDialTransport(&tls.Config{InsecureSkipVerify: true}, timeout)
+	} else {
+		transport = newDialTransport(nil, timeout)
 	}
 
-	client := &http.Client{Timeout: timeout, Transport: transport}
+	// No Client.Timeout on purpose: it rewrites dial timeouts into a generic
+	// "Client.Timeout exceeded" error that hides whether the host was reachable.
+	// The dial/header deadlines live on the transport so classifyHTTPError can
+	// tell a dead host (dial timeout) from a hung agent (header timeout).
+	client := &http.Client{Transport: transport}
 
 	u := fmt.Sprintf("%s://%s/health", scheme, ip)
 	if opts.Port != "" {
@@ -108,14 +112,16 @@ func CheckPeer(ip, name, token string, opts CheckOptions) PeerHealth {
 		// Heartbeat failed. Probe the DNS service directly: an unreachable
 		// agent says nothing about whether clients are still being served,
 		// and that distinction decides whether this needs waking someone up.
+		//
+		// ICMP is always probed here, regardless of opts.Ping. That flag only
+		// historically gated this call; the reply is cheap and the evidence is
+		// needed to tell a dead VM from a hung one.
 		ph.AgentProbe = classifyHTTPError(err)
-		if opts.Ping {
-			ph.PingOK = util.PingHost(ip, timeout)
-		}
+		ph.PingOK = util.PingHost(ip, timeout)
 		dnsAddr := net.JoinHostPort(ip, opts.dnsPort())
 		ph.TCP53 = probeTCP(dnsAddr, timeout)
 		ph.UDP53OK = health.CheckUDP(dnsAddr, opts.DNSDomain, timeout)
-		ph.Severity, ph.Diagnosis = Diagnose(ph.AgentProbe, ph.TCP53, ph.UDP53OK)
+		ph.Severity, ph.Diagnosis = Diagnose(ph.AgentProbe, ph.TCP53, ph.UDP53OK, &ph.PingOK)
 		ph.Error = fmt.Sprintf("%s: %v", ph.Diagnosis, err)
 		return ph
 	}

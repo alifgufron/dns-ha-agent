@@ -146,7 +146,7 @@ Total: A back as MASTER ~15s after DNS recovers.
 ### Alert Types
 
 1. **State change** — HEALTHY↔DEGRADED↔UNHEALTHY
-2. **Peer down/up** — peer unreachable (heartbeat timeout) 2× consecutively (~10s) → `Peer DOWN (unreachable)`; back → `UP (recovered)`. With `peer.ping: true`: ping OK → "host UP, service DOWN"; no reply → "host DOWN/RTO"
+2. **Peer down/up** — peer unreachable (heartbeat timeout) 2× consecutively (~10s) → classified by the direct probes (ICMP + TCP 53 + UDP 53): ICMP/no reply → `DOWN (host unreachable)`; ICMP OK but DNS gone → `CRITICAL (host up, DNS not serving)`; DNS answering → `DEGRADED (agent down, DNS serving)`; back → `UP (recovered)`
 3. **Unexpected VIP loss** (`notify.vip_loss_alert`) — node HEALTHY but lost the VIP (was MASTER, now BACKUP) without a higher-priority peer (split-brain / rogue node / CARP desync)
 
 ### Cooldown

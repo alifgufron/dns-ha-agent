@@ -40,7 +40,7 @@ peer:
   bind: "10.0.0.1"                  # management IP — listen on this IP
   port: ":8845"                     # port — MUST be identical on all nodes
   token: "${HA_TOKEN}"              # token — MUST be identical on all nodes
-  ping: false                       # ICMP check on heartbeat failure
+  dns_port: "53"                    # peer DNS port for the fallback probe (default 53)
   tls:
     enabled: false
     cert_file: "/usr/local/etc/dns-ha-agent.crt"
@@ -103,9 +103,9 @@ notify:
 | `peer.bind` | HTTP listen IP — own management IP. **Differs per node** |
 | `peer.port` | Listen port, `:PORT` (e.g. `":8845"`). **MUST be identical on all nodes** |
 | `peer.token` | Shared secret (`${ENV_VAR}` supported). **MUST be identical on all nodes** |
-| `peer.ping` | ICMP ping on heartbeat failure to classify: "host DOWN/RTO" vs "host UP, service DOWN" |
 | `peer.tls` | TLS for peer HTTP (`enabled`, `cert_file`, `key_file`). All nodes need certs; peers query `https://` |
 | `peer.peers` | Other nodes: `ip`, `name`, optional pairwise `token` (overrides global for this pair) |
+| `peer.dns_port` | Peer's DNS port, probed (TCP+UDP) only when the heartbeat fails. Default `53` |
 | `policy.mode` | `"preempt"` (default) or `"sticky"`. **MUST be `"preempt"`** for MASTER reclaim. `"sticky"` never steps down |
 | `notify.email.*` | SMTP config (`enabled`, `smtp_host`, `smtp_port`, `username`, `password`, `from`, `to`) |
 | `notify.slack` | Optional Slack webhook (`enabled`, `webhook_url`) |
