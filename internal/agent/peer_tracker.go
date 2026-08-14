@@ -11,10 +11,11 @@ package agent
 // DOWN alert never fired at all. The Update method keeps that ordering in one
 // place so it stays testable.
 type peerTracker struct {
-	lastOK    map[string]bool
-	downCount map[string]int
-	lastCarp  map[string]string // CARP state the peer last reported while healthy
-	threshold int
+	lastOK     map[string]bool
+	downCount  map[string]int
+	lastCarp   map[string]string // CARP state the peer last reported while healthy
+	lastStatus map[string]string // last status string notified for a DOWN peer
+	threshold  int
 }
 
 func newPeerTracker(threshold int) *peerTracker {
@@ -22,10 +23,11 @@ func newPeerTracker(threshold int) *peerTracker {
 		threshold = 1
 	}
 	return &peerTracker{
-		lastOK:    make(map[string]bool),
-		downCount: make(map[string]int),
-		lastCarp:  make(map[string]string),
-		threshold: threshold,
+		lastOK:     make(map[string]bool),
+		downCount:  make(map[string]int),
+		lastCarp:   make(map[string]string),
+		lastStatus: make(map[string]string),
+		threshold:  threshold,
 	}
 }
 
@@ -49,6 +51,24 @@ func (t *peerTracker) KnownDown(ip string) bool {
 	return seen && !ok
 }
 
+// Status returns the last status string notified for a peer that is down, or
+// the empty string if it was never declared down (or has recovered). The runner
+// uses it to spot a severity change while a peer is already down — the moment a
+// shutting-down VM flips from "connection refused" to "no reply" — so each new
+// classification still fires a fresh notification.
+func (t *peerTracker) Status(ip string) string {
+	return t.lastStatus[ip]
+}
+
+// SetStatus records the status string that was just notified for a peer.
+func (t *peerTracker) SetStatus(ip, status string) {
+	if status == "" {
+		delete(t.lastStatus, ip)
+		return
+	}
+	t.lastStatus[ip] = status
+}
+
 // Update records the result of one poll and reports which alert, if any, should
 // fire. Each DOWN/UP transition fires at most once; a peer that stays down or
 // stays up returns false for both.
@@ -58,6 +78,7 @@ func (t *peerTracker) Update(ip string, ok bool) (down, up bool) {
 	if ok {
 		t.downCount[ip] = 0
 		t.lastOK[ip] = true
+		delete(t.lastStatus, ip)
 		// A peer first seen as reachable is not a "recovery".
 		return false, seen && !wasOK
 	}

@@ -39,6 +39,7 @@ func TestRenderPeerNotificationCritical(t *testing.T) {
 		PeerProbeInfo{
 			Diagnosis:  "peer userland HUNG — the agent accepted the connection but never replied",
 			LastCarp:   "MASTER",
+			Ping:       "✓ reply, 0.458 ms",
 			AgentProbe: "⚠ connected but no reply (hung)",
 			TCP53:      "✗ connection refused (nothing listening)",
 			UDP53:      "✗ not answering DNS queries",
@@ -52,6 +53,9 @@ func TestRenderPeerNotificationCritical(t *testing.T) {
 	}
 	if !strings.Contains(body, "Last CARP:    MASTER") {
 		t.Errorf("body missing last carp: %s", body)
+	}
+	if !strings.Contains(body, "ICMP:        ✓ reply, 0.458 ms") {
+		t.Errorf("body missing ping probe: %s", body)
 	}
 	if !strings.Contains(body, "Agent HTTP:  ⚠ connected but no reply (hung)") {
 		t.Errorf("body missing agent probe: %s", body)

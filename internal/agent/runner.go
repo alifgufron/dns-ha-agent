@@ -551,6 +551,7 @@ func (r *Runner) runOnce() {
 			r.log.Warn("[PEER] peer unreachable",
 				"peer", ph.Name,
 				"ping", ph.PingOK,
+				"ping_detail", ph.PingDetail,
 				"http", ph.AgentProbe.String(),
 				"tcp53", ph.TCP53.String(),
 				"udp53", udpProbeString(ph.UDP53OK),
@@ -589,6 +590,7 @@ func (r *Runner) runOnce() {
 			info := notify.PeerProbeInfo{
 				Diagnosis:  ph.Diagnosis,
 				LastCarp:   r.peers.LastCarp(ph.IP),
+				Ping:       pingProbeString(ph.PingOK, ph.PingDetail),
 				AgentProbe: ph.AgentProbe.String(),
 				TCP53:      ph.TCP53.String(),
 				UDP53:      udpProbeString(ph.UDP53OK),
@@ -603,6 +605,7 @@ func (r *Runner) runOnce() {
 					"status", status,
 					"diagnosis", ph.Diagnosis,
 				)
+				r.peers.SetStatus(ph.IP, status)
 				r.notifier.DispatchPeer(
 					status,
 					ph.Name,
@@ -615,6 +618,7 @@ func (r *Runner) runOnce() {
 					info,
 				)
 			case cameUp:
+				r.peers.SetStatus(ph.IP, "")
 				r.log.Info("[PEER] peer recovered",
 					"peer", ph.Name,
 					"ip", ph.IP,
@@ -629,6 +633,25 @@ func (r *Runner) runOnce() {
 					notificationCarp.String(),
 					nodeIP,
 					notify.PeerProbeInfo{},
+				)
+			case !ph.OK && r.peers.Status(ph.IP) != "" && status != r.peers.Status(ph.IP):
+				// The peer was already declared DOWN and its classification
+				// CHANGED — e.g. a shutting-down VM moves from "connection
+				// refused" to "no reply at all". Each status has its own
+				// cooldown key, so the change fires immediately instead of
+				// leaving the operator with a stale "host up" email. A peer
+				// down since startup has no recorded status and stays quiet.
+				r.peers.SetStatus(ph.IP, status)
+				r.notifier.DispatchPeer(
+					status,
+					ph.Name,
+					ph.IP,
+					ph.Error,
+					healthResult.Score,
+					currentState.String(),
+					notificationCarp.String(),
+					nodeIP,
+					info,
 				)
 			case !ph.OK && ph.Severity == peer.SeverityCritical:
 				// A VIP held by a node that no longer answers DNS needs a human.
@@ -714,6 +737,20 @@ func udpProbeString(ok bool) string {
 		return "✓ answering DNS queries"
 	}
 	return "✗ not answering DNS queries"
+}
+
+// pingProbeString renders the ICMP probe result with its RTT or error detail.
+func pingProbeString(ok bool, detail string) string {
+	if ok {
+		if detail != "" {
+			return "✓ reply, " + detail
+		}
+		return "✓ replying"
+	}
+	if detail != "" {
+		return "✗ no reply — " + detail
+	}
+	return "✗ no reply"
 }
 
 type httpServer struct {

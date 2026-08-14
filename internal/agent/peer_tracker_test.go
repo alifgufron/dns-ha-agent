@@ -89,3 +89,41 @@ func TestPeerTrackerIsolatesPeers(t *testing.T) {
 		t.Error("one failure per peer must not be combined into a shared streak")
 	}
 }
+
+// A severity change while a peer is already down (e.g. a VM shutting down moves
+// from "connection refused" to "no reply") must be visible to the runner so it
+// can fire a fresh notification with the new classification.
+func TestPeerStatusChangeWhileDown(t *testing.T) {
+	tr := newPeerTracker(2)
+	tr.Update(testPeerIP, true)
+	tr.Update(testPeerIP, false)
+	tr.Update(testPeerIP, false) // declared DOWN
+
+	if s := tr.Status(testPeerIP); s != "" {
+		t.Fatalf("status should be unset before first notify, got %q", s)
+	}
+
+	tr.SetStatus(testPeerIP, "CRITICAL (host up, DNS not serving)")
+	if !tr.KnownDown(testPeerIP) {
+		t.Fatal("peer must be KnownDown after being declared down")
+	}
+	if s := tr.Status(testPeerIP); s != "CRITICAL (host up, DNS not serving)" {
+		t.Fatalf("Status = %q, want CRITICAL", s)
+	}
+
+	// Same status again → no change.
+	if s := tr.Status(testPeerIP); s == "DOWN (host unreachable)" {
+		t.Fatal("status must not silently mutate")
+	}
+
+	tr.SetStatus(testPeerIP, "DOWN (host unreachable)")
+	if s := tr.Status(testPeerIP); s != "DOWN (host unreachable)" {
+		t.Fatalf("Status after change = %q, want DOWN", s)
+	}
+
+	// Recovery clears the recorded status.
+	tr.Update(testPeerIP, true)
+	if s := tr.Status(testPeerIP); s != "" {
+		t.Errorf("status must clear on recovery, got %q", s)
+	}
+}

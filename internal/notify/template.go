@@ -237,6 +237,7 @@ This is an automated notification from dns-ha-agent.
 type PeerProbeInfo struct {
 	Diagnosis  string // human conclusion: hung, host down, agent down, ...
 	LastCarp   string // CARP state the peer last reported while healthy
+	Ping       string // ICMP probe result (RTT or error)
 	AgentProbe string // agent heartbeat port probe result
 	TCP53      string // TCP :53 probe result
 	UDP53      string // UDP :53 (DNS query) probe result
@@ -251,6 +252,7 @@ func formatProbes(info PeerProbeInfo) string {
 		}
 	}
 	write("Agent HTTP:  ", info.AgentProbe)
+	write("ICMP:        ", info.Ping)
 	write("TCP :53:     ", info.TCP53)
 	write("UDP :53:     ", info.UDP53)
 	return b.String()

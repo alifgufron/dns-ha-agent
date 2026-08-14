@@ -63,6 +63,7 @@ type PeerHealth struct {
 	// Fallback probes, filled only when the heartbeat fails. They answer the
 	// question the heartbeat cannot: is the peer still serving DNS, and is it
 	// dead or merely hung?
+	PingDetail string   `json:"ping_detail,omitempty"` // ICMP RTT on success, ping error otherwise
 	AgentProbe Probe    `json:"agent_probe"`
 	TCP53      Probe    `json:"tcp53"`
 	UDP53OK    bool     `json:"udp53_ok"`
@@ -117,7 +118,7 @@ func CheckPeer(ip, name, token string, opts CheckOptions) PeerHealth {
 		// historically gated this call; the reply is cheap and the evidence is
 		// needed to tell a dead VM from a hung one.
 		ph.AgentProbe = classifyHTTPError(err)
-		ph.PingOK = util.PingHost(ip, timeout)
+		ph.PingOK, ph.PingDetail = util.PingHost(ip, timeout)
 		dnsAddr := net.JoinHostPort(ip, opts.dnsPort())
 		ph.TCP53 = probeTCP(dnsAddr, timeout)
 		ph.UDP53OK = health.CheckUDP(dnsAddr, opts.DNSDomain, timeout)
