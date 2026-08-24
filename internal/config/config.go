@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -95,9 +96,9 @@ type TLSServerConfig struct {
 	KeyFile  string `yaml:"key_file"`
 }
 
-// ListenAddr returns bind IP + port (e.g. "10.0.0.1:8080") for HTTP server
+// ListenAddr returns bind IP + port (e.g. "10.0.0.1:8080" or "[::1]:8080") for HTTP server
 func (p PeerConfig) ListenAddr() string {
-	return p.Bind + p.Port
+	return net.JoinHostPort(p.Bind, p.PortNum())
 }
 
 // PortNum returns just the port number (e.g. "8080") for peer client URLs

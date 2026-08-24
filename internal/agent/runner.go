@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -166,18 +168,29 @@ func (r *Runner) Reload(newCfg *config.Config) {
 func (r *Runner) Run() error {
 	cfg := r.cfgValue()
 	if cfg.Peer.Enabled {
+		srv := &httpServer{
+			addr:    cfg.Peer.ListenAddr(),
+			handler: r.peerSrv.Handler(),
+			log:     r.log,
+			tls:     cfg.Peer.TLS,
+		}
 		r.wg.Add(1)
 		go func() {
 			defer r.wg.Done()
-			srv := &httpServer{
-				addr:    cfg.Peer.ListenAddr(),
-				handler: r.peerSrv.Handler(),
-				log:     r.log,
-				tls:     cfg.Peer.TLS,
-			}
 			r.log.Info("[PEER] starting peer heartbeat server", "bind", cfg.Peer.Bind, "tls", cfg.Peer.TLS.Enabled)
-			if err := srv.ListenAndServe(); err != nil {
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				r.log.Error("[PEER] heartbeat server error", "error", err)
+			}
+		}()
+
+		r.wg.Add(1)
+		go func() {
+			defer r.wg.Done()
+			<-r.done
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				r.log.Warn("[PEER] heartbeat server shutdown error", "error", err)
 			}
 		}()
 	}
@@ -758,6 +771,8 @@ type httpServer struct {
 	handler http.Handler
 	log     *slog.Logger
 	tls     config.TLSServerConfig
+	server  *http.Server
+	mu      sync.Mutex
 }
 
 func (s *httpServer) ListenAndServe() error {
@@ -765,8 +780,23 @@ func (s *httpServer) ListenAndServe() error {
 		Addr:    s.addr,
 		Handler: s.handler,
 	}
+	s.mu.Lock()
+	s.server = srv
+	s.mu.Unlock()
+
 	if s.tls.Enabled {
 		return srv.ListenAndServeTLS(s.tls.CertFile, s.tls.KeyFile)
 	}
 	return srv.ListenAndServe()
+}
+
+func (s *httpServer) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	srv := s.server
+	s.mu.Unlock()
+
+	if srv == nil {
+		return nil
+	}
+	return srv.Shutdown(ctx)
 }

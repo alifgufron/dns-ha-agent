@@ -89,6 +89,7 @@ func CheckPeer(ip, name, token string, opts CheckOptions) PeerHealth {
 	} else {
 		transport = newDialTransport(nil, timeout)
 	}
+	defer transport.CloseIdleConnections()
 
 	// No Client.Timeout on purpose: it rewrites dial timeouts into a generic
 	// "Client.Timeout exceeded" error that hides whether the host was reachable.

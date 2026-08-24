@@ -70,3 +70,29 @@ func TestParseAdvskew(t *testing.T) {
 		t.Errorf("vhid 2 advskew = %d (ok=%v), want 0", skew, ok)
 	}
 }
+
+func TestParseSysctlInt(t *testing.T) {
+	cases := []struct {
+		input   string
+		want    int
+		wantErr bool
+	}{
+		{"0\n", 0, false},
+		{"255\n", 255, false},
+		{" 50 \r\n", 50, false},
+		{"-765\n", -765, false},
+		{"invalid\n", 0, true},
+		{"", 0, true},
+	}
+	for _, tc := range cases {
+		got, err := parseSysctlInt(tc.input)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("parseSysctlInt(%q): err=%v, wantErr=%v", tc.input, err, tc.wantErr)
+			continue
+		}
+		if !tc.wantErr && got != tc.want {
+			t.Errorf("parseSysctlInt(%q) = %d, want %d", tc.input, got, tc.want)
+		}
+	}
+}
+

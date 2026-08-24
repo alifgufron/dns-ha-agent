@@ -43,7 +43,7 @@ func GetPreempt() (int, error) {
 	if result.Err != nil {
 		return 0, fmt.Errorf("get preempt: %w (stderr: %s)", result.Err, result.Stderr)
 	}
-	return strconv.Atoi(strings.TrimSpace(result.Stdout))
+	return parseSysctlInt(result.Stdout)
 }
 
 func GetDemotion() (int, error) {
@@ -51,5 +51,10 @@ func GetDemotion() (int, error) {
 	if result.Err != nil {
 		return 0, fmt.Errorf("get demotion: %w (stderr: %s)", result.Err, result.Stderr)
 	}
-	return strconv.Atoi(result.Stdout)
+	return parseSysctlInt(result.Stdout)
 }
+
+func parseSysctlInt(out string) (int, error) {
+	return strconv.Atoi(strings.TrimSpace(out))
+}
+

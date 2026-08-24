@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/alifgufron/dns-ha-agent/internal/util"
 )
 
 const defaultTemplate = `DNS HA Agent — State Change
@@ -90,12 +91,11 @@ func generateReason(processOK, tcpOK, udpOK, dnsOK bool) string {
 }
 
 func getCarpArpLog() string {
-	cmd := exec.Command("sh", "-c", "grep -E 'carp:|arp:' /var/log/messages 2>/dev/null | tail -10")
-	out, err := cmd.Output()
-	if err != nil || len(out) == 0 {
+	res := util.ExecTimeout(2*time.Second, "sh", "-c", "grep -E 'carp:|arp:' /var/log/messages 2>/dev/null | tail -10")
+	if res.Err != nil || len(res.Stdout) == 0 {
 		return "  (no recent CARP/ARP messages)"
 	}
-	return "  " + strings.TrimSpace(strings.ReplaceAll(string(out), "\n", "\n  "))
+	return "  " + strings.TrimSpace(strings.ReplaceAll(res.Stdout, "\n", "\n  "))
 }
 
 func RenderNotification(newState, oldState string, score, demotion int, nodeIP, vip, carpState, mgmtIface, vipIface string, processOK, tcpOK, udpOK, dnsOK bool) (string, string) {

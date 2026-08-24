@@ -147,3 +147,27 @@ func TestDeprecatedMasterLossAlertAlias(t *testing.T) {
 		t.Error("vip_loss_alert should win over the legacy key")
 	}
 }
+
+func TestPeerListenAddr(t *testing.T) {
+	cases := []struct {
+		name     string
+		bind     string
+		port     string
+		expected string
+	}{
+		{"ipv4 with colon", "10.0.0.1", ":8845", "10.0.0.1:8845"},
+		{"ipv4 without colon", "10.0.0.1", "8845", "10.0.0.1:8845"},
+		{"ipv6 with colon", "fe80::1", ":8845", "[fe80::1]:8845"},
+		{"ipv6 localhost", "::1", ":8845", "[::1]:8845"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := PeerConfig{Bind: tc.bind, Port: tc.port}
+			got := p.ListenAddr()
+			if got != tc.expected {
+				t.Fatalf("ListenAddr() = %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
+
