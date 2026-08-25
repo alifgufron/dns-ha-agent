@@ -25,7 +25,8 @@ CARP VIP interface DOWN, triggering immediate takeover by a healthy peer.
 
 - Dual-interface (mgmt always UP + VIP/CARP controlled by agent) & dual-stack (IPv4+IPv6)
 - Multi-DNS: `process_names` for dnsdist, BIND9, or both; configurable check weights
-- **SLA-Aware Health Checks:** dynamic record types (A, AAAA, SOA, etc.), multi-domain queries, and latency SLA threshold penalty
+- **SLA-Aware Health Checks:** dynamic record types (A, AAAA, SOA, etc.), multi-domain queries, dual-stack IPv4/IPv6 `bind_addresses`, and latency SLA threshold penalty
+- **Prometheus & Grafana:** built-in `/metrics` OpenMetrics exporter with ready-to-import Grafana dashboard template
 - **CLI Diagnostics:** built-in `check` report, `status` dashboard, and `version` subcommands
 - Primary failover via `ifconfig down` (<1s), agent-level preempt, effective advskew comparison
 - Kernel-preempt aware: honors `net.inet.carp.preempt=1` on a peer instead of double-acting

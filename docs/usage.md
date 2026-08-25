@@ -239,6 +239,54 @@ a restart.
 
 ---
 
+## Prometheus & Grafana Monitoring
+
+`dns-ha-agent` exposes an OpenMetrics / Prometheus compatible endpoint at **`/metrics`** on the peer HTTP server port (e.g. `:8845`).
+
+Configure your remote Prometheus server to scrape each cluster node.
+
+> **Authentication Note:** The `bearer_token` in `prometheus.yml` must match the cluster shared secret (`peer.token` in `config.yaml`, or `${HA_TOKEN}` environment variable).
+
+```yaml
+scrape_configs:
+  - job_name: 'dns-ha-cluster'
+    scrape_interval: 5s
+    scrape_timeout: 3s
+    metrics_path: '/metrics'
+    # Must match peer.token / HA_TOKEN secret on the agent nodes:
+    bearer_token: 'SuperSecretClusterToken123'
+    static_configs:
+      - targets:
+          - '10.0.0.1:8845'   # Node A Mgmt IP
+          - '10.0.0.2:8845'   # Node B Mgmt IP
+        labels:
+          cluster: 'dns-production'
+```
+
+### 2. Exported Prometheus Metrics
+
+| Metric | Type | Description |
+|---|---|---|
+| `dns_ha_health_score` | Gauge | Current node health score (`0-100`) |
+| `dns_ha_carp_role{role="MASTER\|BACKUP"}` | Gauge | CARP status (`1` if active in role, `0` if inactive) |
+| `dns_ha_advskew` | Gauge | CARP advskew configured on VIP interface |
+| `dns_ha_demotion_factor` | Gauge | Current CARP demotion counter (`0`, `50`, `255`, etc.) |
+| `dns_ha_kernel_preempt` | Gauge | FreeBSD `net.inet.carp.preempt` status (`0` or `1`) |
+| `dns_ha_check_status{check="process\|tcp\|udp\|dns"}` | Gauge | Status of individual check (`1` = OK, `0` = FAIL) |
+| `dns_ha_check_rtt_seconds{check="dns"}` | Gauge | DNS query round-trip latency in seconds |
+
+### 3. Grafana Dashboard Setup (v7+ / v8 / v9 / v10 / Latest)
+
+A pre-built, production-ready Grafana dashboard JSON template is included at [`docs/grafana-dashboard.json`](file:///c:/4life/dns-ha-agent/docs/grafana-dashboard.json).
+
+**How to Import into Grafana:**
+1. Open Grafana Web Interface (version 7.0+ or latest).
+2. Go to **Dashboards** → **New** → **Import**.
+3. Upload `docs/grafana-dashboard.json` or paste its raw JSON content.
+4. Select your **Prometheus Data Source** and click **Import**.
+
+---
+
 ## TLS Peer (optional)
 
 ```bash

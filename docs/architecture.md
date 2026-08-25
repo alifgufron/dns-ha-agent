@@ -165,3 +165,4 @@ Includes predicted CARP state (avoids misleading "CARP: BACKUP" when the node wi
 - **State persistence** (`agent.state_file`): restart does not re-notify stale transitions
 - **Config reload** (SIGHUP / `service dns-ha-agent reload`): health/weights/policy/notify apply immediately; peer bind/port/token/tls require restart
 - **Peer security**: shared-secret `X-DNS-HA-TOKEN` (or `Authorization: Bearer`), per-peer pairwise token, TLS (self-signed OK — the token is the authenticator, not the certificate)
+- **Metrics exporter**: built-in `/metrics` OpenMetrics endpoint sharing the HTTP server for Prometheus scraping and Grafana dashboard visualization
