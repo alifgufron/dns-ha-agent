@@ -9,17 +9,12 @@
 | Third-party Go modules | none | Standard library only; no network access needed to build |
 | Build host OS | any | Linux/macOS can cross-compile a FreeBSD binary |
 
-Install the toolchain:
+Install the toolchain on FreeBSD:
 
 ```bash
 pkg install go          # FreeBSD
-apt install golang-go   # Debian/Ubuntu (or grab a tarball from https://go.dev/dl/)
-dnf install golang      # RHEL/Rocky
 go version              # verify it meets the version in go.mod
 ```
-
-`scripts/install.sh` checks both that `go` exists and that it is new enough,
-and aborts with an explicit message if not.
 
 ### Runtime requirements (target node)
 
@@ -138,8 +133,8 @@ cp scripts/rc.d/dns-ha-agent /usr/local/etc/rc.d/ && chmod 0555 /usr/local/etc/r
 ```bash
 mkdir -p /etc/rc.conf.d
 cat > /etc/rc.conf.d/dns-ha-agent << 'EOF'
-export HA_TOKEN="RahasiaSuperAman123"
-export SMTP_PASS="smtpsecret"
+export HA_TOKEN="SuperSecretClusterToken123"
+export SMTP_PASS="smtpsecretpassword"
 EOF
 chmod 0600 /etc/rc.conf.d/dns-ha-agent
 ```
@@ -184,6 +179,40 @@ The agent detects this automatically (peers report `preempt` over the heartbeat)
 and **defers to the kernel** instead of stepping down at the same time, falling
 back after a 15s grace period if the kernel does not reclaim. No config change
 needed. See architecture.md → "Kernel preempt interop".
+
+### Firewall (PF) — Securing Peer Heartbeat Port
+
+To restrict access to the HTTP heartbeat port (e.g. TCP `:8845`) strictly to cluster peers and protect against unauthorized network scans, configure FreeBSD's Packet Filter (`pf`):
+
+1. Add rules to `/etc/pf.conf`:
+```pf
+# Management interface & HA agent port
+mgmt_if = "vtnet0"
+ha_port = "8845"
+
+# Cluster peers table (management IPs of all nodes)
+table <ha_peers> const { 10.0.0.1, 10.0.0.2, 10.0.0.3 }
+
+# Allow CARP multicast traffic
+pass in on vtnet1 proto carp keep state
+
+# Allow ICMP ping between cluster nodes (used for host liveness diagnosis)
+pass in on $mgmt_if inet proto icmp icmp-type { echoreq } from <ha_peers> to ($mgmt_if) keep state
+
+# Allow DNS-HA-Agent HTTP heartbeat ONLY from cluster peers
+pass in quick on $mgmt_if proto tcp from <ha_peers> to ($mgmt_if) port $ha_port flags S/SA keep state
+
+# Block all unauthorized access to the HA agent port
+block in quick on $mgmt_if proto tcp to ($mgmt_if) port $ha_port
+```
+
+2. Enable and start PF:
+```bash
+sysrc pf_enable=YES
+sysrc pf_rules="/etc/pf.conf"
+service pf start
+service pf reload    # if pf was already running
+```
 
 ### Log rotation (newsyslog)
 
