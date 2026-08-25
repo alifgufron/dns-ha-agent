@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,7 +48,12 @@ func (s *HeartbeatServer) Handler() http.Handler {
 
 func (s *HeartbeatServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get("X-HA-DDIST-TOKEN")
+		token := r.Header.Get("X-DNS-HA-TOKEN")
+		if token == "" {
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				token = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
 		s.mu.RLock()
 		ok := s.tokens[token]
 		s.mu.RUnlock()

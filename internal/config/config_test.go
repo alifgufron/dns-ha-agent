@@ -175,3 +175,27 @@ func TestPeerListenAddr(t *testing.T) {
 	}
 }
 
+func TestBindAddressListAndValidate(t *testing.T) {
+	h := HealthConfig{
+		BindAddresses: []string{"127.0.0.1:53", "[::1]:53"},
+	}
+	list := h.BindAddressList()
+	if len(list) != 2 || list[0] != "127.0.0.1:53" || list[1] != "[::1]:53" {
+		t.Fatalf("BindAddressList() failed, got %v", list)
+	}
+
+	cfg := &Config{
+		Agent: AgentConfig{Interface: "vtnet0", VIPInterface: "vtnet1", VHID: 1},
+		Health: HealthConfig{
+			BindAddresses: []string{"127.0.0.1:53", "invalid-no-port", ""},
+		},
+		CARP: CARPConfig{DemotionHealthy: 0, DemotionDegraded: 50, DemotionUnhealthy: 255},
+		Peer: PeerConfig{Enabled: false},
+	}
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected error on invalid bind_addresses, got nil")
+	}
+}
+
+

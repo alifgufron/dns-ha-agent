@@ -164,4 +164,4 @@ Includes predicted CARP state (avoids misleading "CARP: BACKUP" when the node wi
 - **Graceful shutdown** (SIGTERM/SIGINT): restore iface UP + demotion 0 + persist state before exit
 - **State persistence** (`agent.state_file`): restart does not re-notify stale transitions
 - **Config reload** (SIGHUP / `service dns-ha-agent reload`): health/weights/policy/notify apply immediately; peer bind/port/token/tls require restart
-- **Peer security**: shared-secret `X-HA-DDIST-TOKEN`, per-peer pairwise token, TLS (self-signed OK — the token is the authenticator, not the certificate)
+- **Peer security**: shared-secret `X-DNS-HA-TOKEN` (or `Authorization: Bearer`), per-peer pairwise token, TLS (self-signed OK — the token is the authenticator, not the certificate)

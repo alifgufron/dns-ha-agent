@@ -56,6 +56,16 @@ func Validate(cfg *Config) error {
 			errs = append(errs, fmt.Errorf("health.bind_address %q is not valid host:port", cfg.Health.BindAddress))
 		}
 	}
+	for i, addr := range cfg.Health.BindAddresses {
+		if strings.TrimSpace(addr) == "" {
+			errs = append(errs, fmt.Errorf("health.bind_addresses[%d] is empty", i))
+			continue
+		}
+		_, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("health.bind_addresses[%d] %q is not valid host:port", i, addr))
+		}
+	}
 
 	validateWeight := func(field string, v int) {
 		if v < 0 || v > 100 {

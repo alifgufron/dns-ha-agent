@@ -112,3 +112,40 @@ func portOfAddr(addr string) string {
 	}
 	return port
 }
+
+func TestHeartbeatServerAuth(t *testing.T) {
+	srv := NewHeartbeatServer("my-secret", []string{"pair-secret"}, "vtnet1", 1, func() health.HealthResult {
+		return health.HealthResult{Score: 100}
+	}, nil)
+
+	handler := srv.Handler()
+
+	tests := []struct {
+		name       string
+		headerKey  string
+		headerVal  string
+		wantStatus int
+	}{
+		{"valid X-DNS-HA-TOKEN", "X-DNS-HA-TOKEN", "my-secret", http.StatusOK},
+		{"valid pairwise X-DNS-HA-TOKEN", "X-DNS-HA-TOKEN", "pair-secret", http.StatusOK},
+		{"valid Bearer token", "Authorization", "Bearer my-secret", http.StatusOK},
+		{"invalid token", "X-DNS-HA-TOKEN", "wrong-secret", http.StatusUnauthorized},
+		{"missing token", "", "", http.StatusUnauthorized},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/health", nil)
+			if tc.headerKey != "" {
+				req.Header.Set(tc.headerKey, tc.headerVal)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", w.Code, tc.wantStatus)
+			}
+		})
+	}
+}
+

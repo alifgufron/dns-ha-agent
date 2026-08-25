@@ -155,6 +155,7 @@ func runCheckCmd(args []string) {
 		DNSRecordType:       cfg.Health.DNSQuery.Type(),
 		DNSLatencyThreshold: cfg.Health.DNSQuery.LatencyThreshold,
 		BindAddress:         cfg.Health.BindAddress,
+		BindAddresses:       cfg.Health.BindAddressList(),
 		Timeout:             cfg.Health.DNSQuery.Timeout,
 	}
 	if !cfg.Health.ProcessCheck {

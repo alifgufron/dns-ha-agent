@@ -230,7 +230,7 @@ EOF
 tail -f /var/log/dns-ha-agent.log
 sysctl net.inet.carp.demotion        # 0=HEALTHY 50=DEGRADED 255=UNHEALTHY
 ifconfig vtnet1 | grep carp          # carp: MASTER / BACKUP
-curl -H "X-HA-DDIST-TOKEN: secret" http://10.0.0.11:8845/health
+curl -H "X-DNS-HA-TOKEN: secret" http://10.0.0.11:8845/health
 ```
 
 Reload without restart: `service dns-ha-agent reload` (SIGHUP). Changes to
@@ -528,7 +528,7 @@ the cause is different from a real split-brain. Distinguish them by checking
 whether the peer is simply unreachable:
 
 ```bash
-curl -H "X-HA-DDIST-TOKEN: $HA_TOKEN" http://<peer_mgmt_ip>:8845/health
+curl -H "X-DNS-HA-TOKEN: $HA_TOKEN" http://<peer_mgmt_ip>:8845/health
 ```
 
 You will usually see the `Peer DOWN` alert next to the MASTER-loss one in that

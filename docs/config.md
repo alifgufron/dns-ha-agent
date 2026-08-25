@@ -95,6 +95,7 @@ notify:
 | `health.udp_check` | UDP port :53 via DNS query. Uses `dns_query.domain`; only checks that a valid DNS response returns (rcode ignored), so authoritative-only servers pass |
 | `health.dns_query` | DNS query check (`enabled`, `domain`, `domains`, `record_type`, `timeout`, `latency_threshold`) |
 | `health.bind_address` | Where the DNS server listens (default `127.0.0.1:53`) |
+| `health.bind_addresses` | Optional list of DNS listen addresses for dual-stack IPv4/IPv6 (`["127.0.0.1:53", "[::1]:53"]`). If configured, all addresses are probed |
 | `health.weights` | Weight per check (`process`/`tcp`/`udp`/`dns`), default 25/25/25/25. 0 = no score (use `*_check` flags to fully disable). Weights need not sum to 100 — the score is normalized to 0-100 against the sum of enabled weights |
 | `health.dns_query.domain` | Primary domain to query. For an authoritative-only server (BIND9 without recursion) use a zone it actually serves, otherwise the check gets REFUSED and fails |
 | `health.dns_query.domains` | Optional list of domains to query (`["google.com", "example.com"]`). If provided, all domains are queried and average RTT is computed |

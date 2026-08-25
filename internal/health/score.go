@@ -50,9 +50,13 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 		timeout = cfg.Timeout
 	}
 
-	address := "127.0.0.1:53"
-	if cfg.BindAddress != "" {
-		address = cfg.BindAddress
+	addresses := cfg.BindAddresses
+	if len(addresses) == 0 {
+		if cfg.BindAddress != "" {
+			addresses = []string{cfg.BindAddress}
+		} else {
+			addresses = []string{"127.0.0.1:53"}
+		}
 	}
 
 	result := HealthResult{
@@ -64,7 +68,14 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 		result.RawScore += w.Process
 	}
 
-	result.TCPAlive = CheckTCP(address, timeout)
+	allTCP := true
+	for _, addr := range addresses {
+		if !CheckTCP(addr, timeout) {
+			allTCP = false
+			break
+		}
+	}
+	result.TCPAlive = allTCP
 	if result.TCPAlive {
 		result.RawScore += w.TCP
 	}
@@ -73,7 +84,14 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 	if udpDomain == "" && len(cfg.DNSDomains) > 0 {
 		udpDomain = cfg.DNSDomains[0]
 	}
-	result.UDPAlive = CheckUDP(address, udpDomain, timeout)
+	allUDP := true
+	for _, addr := range addresses {
+		if !CheckUDP(addr, udpDomain, timeout) {
+			allUDP = false
+			break
+		}
+	}
+	result.UDPAlive = allUDP
 	if result.UDPAlive {
 		result.RawScore += w.UDP
 	}
@@ -91,24 +109,31 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 		allSuccess := true
 		anySlow := false
 		var totalRTT time.Duration
+		var queryCount int
 		var lastDetail DNSResult
 
-		for _, dom := range domains {
-			res := CheckDNSQuery(dom, cfg.DNSRecordType, address, timeout)
-			if !res.Success {
-				allSuccess = false
+		for _, addr := range addresses {
+			for _, dom := range domains {
+				res := CheckDNSQuery(dom, cfg.DNSRecordType, addr, timeout)
+				if !res.Success {
+					allSuccess = false
+					lastDetail = res
+					break
+				}
+				totalRTT += res.RTT
+				queryCount++
+				if cfg.DNSLatencyThreshold > 0 && res.RTT > cfg.DNSLatencyThreshold {
+					anySlow = true
+				}
 				lastDetail = res
+			}
+			if !allSuccess {
 				break
 			}
-			totalRTT += res.RTT
-			if cfg.DNSLatencyThreshold > 0 && res.RTT > cfg.DNSLatencyThreshold {
-				anySlow = true
-			}
-			lastDetail = res
 		}
 
-		if len(domains) > 0 {
-			lastDetail.RTT = totalRTT / time.Duration(len(domains))
+		if queryCount > 0 {
+			lastDetail.RTT = totalRTT / time.Duration(queryCount)
 		}
 		lastDetail.Success = allSuccess
 		lastDetail.Slow = anySlow
@@ -147,5 +172,6 @@ type ProcessConfig struct {
 	DNSRecordType       string
 	DNSLatencyThreshold time.Duration
 	BindAddress         string
+	BindAddresses       []string
 	Timeout             time.Duration
 }

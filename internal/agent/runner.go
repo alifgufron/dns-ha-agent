@@ -266,6 +266,7 @@ func (r *Runner) runOnce() {
 		DNSRecordType:       cfg.Health.DNSQuery.Type(),
 		DNSLatencyThreshold: cfg.Health.DNSQuery.LatencyThreshold,
 		BindAddress:         cfg.Health.BindAddress,
+		BindAddresses:       cfg.Health.BindAddressList(),
 		Timeout:             cfg.Health.DNSQuery.Timeout,
 	}
 	// Weights: configured value, else default, else 0 when check disabled.

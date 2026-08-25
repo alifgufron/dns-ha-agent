@@ -35,14 +35,15 @@ type AgentConfig struct {
 }
 
 type HealthConfig struct {
-	ProcessCheck bool          `yaml:"process_check"`
-	ProcessName  string        `yaml:"process_name"`
-	ProcessNames []string      `yaml:"process_names"`
-	TCPCheck     bool          `yaml:"tcp_check"`
-	UDPCheck     bool          `yaml:"udp_check"`
-	DNSQuery     DNSQuery      `yaml:"dns_query"`
-	BindAddress  string        `yaml:"bind_address"`
-	Weights      WeightsConfig `yaml:"weights"`
+	ProcessCheck  bool          `yaml:"process_check"`
+	ProcessName   string        `yaml:"process_name"`
+	ProcessNames  []string      `yaml:"process_names"`
+	TCPCheck      bool          `yaml:"tcp_check"`
+	UDPCheck      bool          `yaml:"udp_check"`
+	DNSQuery      DNSQuery      `yaml:"dns_query"`
+	BindAddress   string        `yaml:"bind_address"`
+	BindAddresses []string      `yaml:"bind_addresses"`
+	Weights       WeightsConfig `yaml:"weights"`
 }
 
 type WeightsConfig struct {
@@ -62,6 +63,18 @@ func (h HealthConfig) ProcessList() []string {
 		return []string{h.ProcessName}
 	}
 	return []string{"dnsdist"}
+}
+
+// BindAddressList returns all DNS bind addresses to check, honoring
+// bind_addresses (list), falling back to bind_address (single), then default.
+func (h HealthConfig) BindAddressList() []string {
+	if len(h.BindAddresses) > 0 {
+		return h.BindAddresses
+	}
+	if h.BindAddress != "" {
+		return []string{h.BindAddress}
+	}
+	return []string{"127.0.0.1:53"}
 }
 
 type DNSQuery struct {
@@ -190,7 +203,7 @@ var knownKeys = map[string]map[string]bool{
 	"agent":     {"interval": true, "interface": true, "vip_interface": true, "vhid": true, "state_file": true, "recovery_confirm": true},
 	"log_file":  {},
 	"log_level": {},
-	"health":    {"process_check": true, "process_name": true, "process_names": true, "tcp_check": true, "udp_check": true, "dns_query": true, "bind_address": true, "weights": true},
+	"health":    {"process_check": true, "process_name": true, "process_names": true, "tcp_check": true, "udp_check": true, "dns_query": true, "bind_address": true, "bind_addresses": true, "weights": true},
 	"carp":      {"demotion_healthy": true, "demotion_degraded": true, "demotion_unhealthy": true},
 	"peer":      {"enabled": true, "bind": true, "port": true, "token": true, "ping": true, "tls": true, "peers": true, "dns_port": true},
 	"policy":    {"mode": true},

@@ -107,7 +107,7 @@ func CheckPeer(ip, name, token string, opts CheckOptions) PeerHealth {
 		ph.Error = fmt.Sprintf("create request: %v", err)
 		return ph
 	}
-	req.Header.Set("X-HA-DDIST-TOKEN", token)
+	req.Header.Set("X-DNS-HA-TOKEN", token)
 
 	resp, err := client.Do(req)
 	if err != nil {
