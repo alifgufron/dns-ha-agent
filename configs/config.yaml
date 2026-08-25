@@ -21,8 +21,10 @@ health:
   udp_check: true
   dns_query:
     enabled: true
-    domain: "google.com"
+    domain: "google.com"                 # or list: domains: ["google.com", "example.com"]
+    record_type: "A"                     # optional — A, AAAA, SOA, TXT, MX, NS (default "A")
     timeout: 2s
+    latency_threshold: 300ms             # optional — if query RTT > threshold, awards 50% DNS weight (SLA latency penalty)
   bind_address: "127.0.0.1:53"         # change if the DNS server listens on a public IP
   weights:                             # optional — relative weights per check (default 25/25/25/25). 0 = skip weight (use flag to disable)
     process: 25

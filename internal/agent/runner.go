@@ -259,11 +259,14 @@ func (r *Runner) runOnce() {
 	cfg := r.cfgValue()
 
 	healthCfg := health.ProcessConfig{
-		ProcessNames: cfg.Health.ProcessList(),
-		DNSEnabled:   cfg.Health.DNSQuery.Enabled,
-		DNSDomain:    cfg.Health.DNSQuery.Domain,
-		BindAddress:  cfg.Health.BindAddress,
-		Timeout:      cfg.Health.DNSQuery.Timeout,
+		ProcessNames:        cfg.Health.ProcessList(),
+		DNSEnabled:          cfg.Health.DNSQuery.Enabled,
+		DNSDomain:           cfg.Health.DNSQuery.Domain,
+		DNSDomains:          cfg.Health.DNSQuery.DomainList(),
+		DNSRecordType:       cfg.Health.DNSQuery.Type(),
+		DNSLatencyThreshold: cfg.Health.DNSQuery.LatencyThreshold,
+		BindAddress:         cfg.Health.BindAddress,
+		Timeout:             cfg.Health.DNSQuery.Timeout,
 	}
 	// Weights: configured value, else default, else 0 when check disabled.
 	w := cfg.Health.Weights

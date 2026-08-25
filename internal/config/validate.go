@@ -28,8 +28,25 @@ func Validate(cfg *Config) error {
 	}
 
 	if cfg.Health.DNSQuery.Enabled {
-		if cfg.Health.DNSQuery.Domain == "" {
-			errs = append(errs, errors.New("health.dns_query.domain is required when enabled"))
+		if len(cfg.Health.DNSQuery.Domains) == 0 && cfg.Health.DNSQuery.Domain == "" {
+			errs = append(errs, errors.New("health.dns_query.domain or health.dns_query.domains is required when enabled"))
+		}
+		for _, d := range cfg.Health.DNSQuery.Domains {
+			if strings.TrimSpace(d) == "" {
+				errs = append(errs, errors.New("health.dns_query.domains contains an empty domain"))
+			}
+		}
+		if cfg.Health.DNSQuery.LatencyThreshold < 0 {
+			errs = append(errs, fmt.Errorf("health.dns_query.latency_threshold must be >= 0, got %v", cfg.Health.DNSQuery.LatencyThreshold))
+		}
+		if rt := cfg.Health.DNSQuery.RecordType; rt != "" {
+			validTypes := map[string]bool{
+				"A": true, "AAAA": true, "CNAME": true, "TXT": true, "MX": true,
+				"NS": true, "SOA": true, "PTR": true, "SRV": true,
+			}
+			if !validTypes[strings.ToUpper(rt)] {
+				errs = append(errs, fmt.Errorf("health.dns_query.record_type %q is invalid (supported: A, AAAA, CNAME, TXT, MX, NS, SOA, PTR, SRV)", rt))
+			}
 		}
 	}
 

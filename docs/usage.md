@@ -28,7 +28,18 @@ and aborts with an explicit message if not.
 - Two interfaces: management (always up) + VIP/CARP (driven by the agent)
 - No runtime library dependencies — the binary is static
 
-## Build
+## Build & Makefile
+
+Using standard `make`:
+
+```bash
+make            # builds build/dns-ha-agent
+make test       # runs unit test suite
+make install    # installs binary, rc.d script, and sample config (requires root)
+make clean      # cleans build/ artifacts
+```
+
+Or using `go build` directly:
 
 ```bash
 # FreeBSD amd64
@@ -47,12 +58,58 @@ go test ./...
 `scripts/install.sh` also auto-builds and detects the platform (`GOOS`/`GOARCH`
 from `uname`, overridable via env).
 
-## Install
+## CLI Diagnostics & Tools
 
-### Quick (script)
+The agent provides built-in interactive CLI tools for terminal diagnostics:
+
+### 1. Health Check Report (`check`)
+Runs a single comprehensive check cycle and renders an immediate summary report:
 
 ```bash
-sh scripts/install.sh          # build + install binary, config, rc.d
+dns-ha-agent check
+dns-ha-agent check -config /usr/local/etc/dns-ha-agent.yaml
+```
+
+Output:
+```text
+┌────────────────────────────────────────────────────────┐
+│  DNS Health Check Report (14ms)                        │
+├──────────────────────────┬────────┬────────────────────┤
+│ Check                    │ Status │ Detail / Weight    │
+├──────────────────────────┼────────┼────────────────────┤
+│ Process (dnsdist)        │ OK     │ weight: 25         │
+│ TCP :53                  │ OK     │ weight: 25         │
+│ UDP :53                  │ OK     │ weight: 25         │
+│ DNS Query (A)            │ OK     │ RTT: 12ms (wt: 25) │
+├──────────────────────────┴────────┴────────────────────┤
+│ Score: 100 / 100  (Raw: 100/100)   State: HEALTHY      │
+└────────────────────────────────────────────────────────┘
+```
+
+### 2. Node & Peer Status Dashboard (`status`)
+Inspects local CARP status and probes all configured cluster peers:
+
+```bash
+dns-ha-agent status
+```
+
+### 3. Version Info (`version`)
+```bash
+dns-ha-agent version
+```
+
+## Install
+
+### Quick (Makefile)
+
+```bash
+make install          # build + install binary, config, rc.d (run as root / doas / sudo)
+```
+
+To remove:
+```bash
+make uninstall        # removes binary and rc.d script (preserves config)
+make purge            # removes binary, rc.d script, config, log, and state
 ```
 
 ### Install without a Go toolchain
@@ -61,17 +118,17 @@ The target node does not need Go — build elsewhere and copy the binary over:
 
 ```bash
 # On the build host
-BUILD_ONLY=1 GOOS=freebsd GOARCH=amd64 sh scripts/install.sh
-scp build/dns-ha-agent-freebsd-amd64 root@node1:/tmp/
+GOOS=freebsd GOARCH=amd64 make
+scp build/dns-ha-agent root@node1:/tmp/
 
 # On the FreeBSD node (see "Manual" below for config + rc.d)
-install -m 0555 /tmp/dns-ha-agent-freebsd-amd64 /usr/local/bin/dns-ha-agent
+install -m 0555 /tmp/dns-ha-agent /usr/local/bin/dns-ha-agent
 ```
 
 ### Manual
 
 ```bash
-cp build/dns-ha-agent-freebsd-amd64 /usr/local/bin/dns-ha-agent && chmod 0555 /usr/local/bin/dns-ha-agent
+cp build/dns-ha-agent /usr/local/bin/dns-ha-agent && chmod 0555 /usr/local/bin/dns-ha-agent
 cp configs/config.yaml /usr/local/etc/dns-ha-agent.yaml && chmod 0640 /usr/local/etc/dns-ha-agent.yaml
 cp scripts/rc.d/dns-ha-agent /usr/local/etc/rc.d/ && chmod 0555 /usr/local/etc/rc.d/dns-ha-agent
 ```

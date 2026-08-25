@@ -93,10 +93,13 @@ notify:
 | `health.process_names` | **List** of processes for `pgrep -x`. All must be alive. `["dnsdist"]`, `["named"]`, `["dnsdist","named"]`. Legacy single `process_name` also accepted |
 | `health.tcp_check` | TCP port :53 connectivity |
 | `health.udp_check` | UDP port :53 via DNS query. Uses `dns_query.domain`; only checks that a valid DNS response returns (rcode ignored), so authoritative-only servers pass |
-| `health.dns_query` | DNS query check (`enabled`, `domain`, `timeout`) |
+| `health.dns_query` | DNS query check (`enabled`, `domain`, `domains`, `record_type`, `timeout`, `latency_threshold`) |
 | `health.bind_address` | Where the DNS server listens (default `127.0.0.1:53`) |
 | `health.weights` | Weight per check (`process`/`tcp`/`udp`/`dns`), default 25/25/25/25. 0 = no score (use `*_check` flags to fully disable). Weights need not sum to 100 — the score is normalized to 0-100 against the sum of enabled weights |
-| `health.dns_query.domain` | Domain to query. For an authoritative-only server (BIND9 without recursion) use a zone it actually serves, otherwise the check gets REFUSED and fails |
+| `health.dns_query.domain` | Primary domain to query. For an authoritative-only server (BIND9 without recursion) use a zone it actually serves, otherwise the check gets REFUSED and fails |
+| `health.dns_query.domains` | Optional list of domains to query (`["google.com", "example.com"]`). If provided, all domains are queried and average RTT is computed |
+| `health.dns_query.record_type` | Optional DNS RR type to query (default `"A"`, supports `"AAAA"`, `"SOA"`, `"TXT"`, `"MX"`, `"NS"`, `"PTR"`, `"SRV"`, `"CNAME"`) |
+| `health.dns_query.latency_threshold` | Optional SLA threshold (e.g. `300ms`). If query succeeds but RTT exceeds threshold, awards 50% DNS weight as a latency SLA penalty |
 | `carp.demotion_healthy` | Demotion when HEALTHY (default 0) |
 | `carp.demotion_degraded` | Demotion when DEGRADED (default 50) |
 | `carp.demotion_unhealthy` | Demotion when UNHEALTHY (default 255) |

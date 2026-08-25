@@ -65,9 +65,29 @@ func (h HealthConfig) ProcessList() []string {
 }
 
 type DNSQuery struct {
-	Enabled bool          `yaml:"enabled"`
-	Domain  string        `yaml:"domain"`
-	Timeout time.Duration `yaml:"timeout"`
+	Enabled          bool          `yaml:"enabled"`
+	Domain           string        `yaml:"domain"`
+	Domains          []string      `yaml:"domains"`
+	RecordType       string        `yaml:"record_type"`
+	Timeout          time.Duration `yaml:"timeout"`
+	LatencyThreshold time.Duration `yaml:"latency_threshold"`
+}
+
+func (d DNSQuery) DomainList() []string {
+	if len(d.Domains) > 0 {
+		return d.Domains
+	}
+	if d.Domain != "" {
+		return []string{d.Domain}
+	}
+	return []string{"google.com"}
+}
+
+func (d DNSQuery) Type() string {
+	if d.RecordType != "" {
+		return strings.ToUpper(d.RecordType)
+	}
+	return "A"
 }
 
 type CARPConfig struct {
@@ -180,7 +200,7 @@ var knownKeys = map[string]map[string]bool{
 }
 
 var nestedKeys = map[string]map[string]bool{
-	"dns_query":  {"enabled": true, "domain": true, "timeout": true},
+	"dns_query":  {"enabled": true, "domain": true, "domains": true, "record_type": true, "timeout": true, "latency_threshold": true},
 	"email":      {"enabled": true, "smtp_host": true, "smtp_port": true, "username": true, "password": true, "from": true, "to": true},
 	"weights":    {"process": true, "tcp": true, "udp": true, "dns": true},
 	"tls":        {"enabled": true, "cert_file": true, "key_file": true},

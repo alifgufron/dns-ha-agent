@@ -69,20 +69,59 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 		result.RawScore += w.TCP
 	}
 
-	result.UDPAlive = CheckUDP(address, cfg.DNSDomain, timeout)
+	udpDomain := cfg.DNSDomain
+	if udpDomain == "" && len(cfg.DNSDomains) > 0 {
+		udpDomain = cfg.DNSDomains[0]
+	}
+	result.UDPAlive = CheckUDP(address, udpDomain, timeout)
 	if result.UDPAlive {
 		result.RawScore += w.UDP
 	}
 
 	if cfg.DNSEnabled {
-		domain := cfg.DNSDomain
-		if domain == "" {
-			domain = "google.com"
+		domains := cfg.DNSDomains
+		if len(domains) == 0 {
+			if cfg.DNSDomain != "" {
+				domains = []string{cfg.DNSDomain}
+			} else {
+				domains = []string{"google.com"}
+			}
 		}
-		result.DNSDetail = CheckDNS(domain, address, timeout)
-		result.DNSAlive = result.DNSDetail.Success
+
+		allSuccess := true
+		anySlow := false
+		var totalRTT time.Duration
+		var lastDetail DNSResult
+
+		for _, dom := range domains {
+			res := CheckDNSQuery(dom, cfg.DNSRecordType, address, timeout)
+			if !res.Success {
+				allSuccess = false
+				lastDetail = res
+				break
+			}
+			totalRTT += res.RTT
+			if cfg.DNSLatencyThreshold > 0 && res.RTT > cfg.DNSLatencyThreshold {
+				anySlow = true
+			}
+			lastDetail = res
+		}
+
+		if len(domains) > 0 {
+			lastDetail.RTT = totalRTT / time.Duration(len(domains))
+		}
+		lastDetail.Success = allSuccess
+		lastDetail.Slow = anySlow
+		result.DNSDetail = lastDetail
+		result.DNSAlive = allSuccess
+
 		if result.DNSAlive {
-			result.RawScore += w.DNS
+			if anySlow {
+				// SLA Penalty: query succeeded but exceeded latency threshold, award 50% DNS weight
+				result.RawScore += w.DNS / 2
+			} else {
+				result.RawScore += w.DNS
+			}
 		}
 	}
 
@@ -97,13 +136,16 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 }
 
 type ProcessConfig struct {
-	ProcessNames  []string
-	ProcessWeight int
-	TCPWeight     int
-	UDPWeight     int
-	DNSWeight     int
-	DNSEnabled    bool
-	DNSDomain     string
-	BindAddress   string
-	Timeout       time.Duration
+	ProcessNames        []string
+	ProcessWeight       int
+	TCPWeight           int
+	UDPWeight           int
+	DNSWeight           int
+	DNSEnabled          bool
+	DNSDomain           string
+	DNSDomains          []string
+	DNSRecordType       string
+	DNSLatencyThreshold time.Duration
+	BindAddress         string
+	Timeout             time.Duration
 }
