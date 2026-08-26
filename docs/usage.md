@@ -239,13 +239,26 @@ a restart.
 
 ---
 
-## Prometheus & Grafana Monitoring
+## Metrics & Monitoring (Prometheus, Telegraf, InfluxDB, Grafana)
 
-`dns-ha-agent` exposes an OpenMetrics / Prometheus compatible endpoint at **`/metrics`** on the peer HTTP server port (e.g. `:8845`).
+`dns-ha-agent` exposes a standard OpenMetrics / Prometheus text endpoint at **`/metrics`** on the peer HTTP server port (e.g. `:8845`).
 
-Configure your remote Prometheus server to scrape each cluster node.
+Because `/metrics` strictly adheres to the standard **OpenMetrics / Prometheus exposition format**, it is fully compatible with **any metric scraper or collector** that supports Prometheus scraping, including:
+- **Prometheus Server**
+- **Telegraf** (with direct output to **InfluxDB v1.x**, **InfluxDB v2.x / v3 / InfluxDB Cloud**)
+- **VictoriaMetrics** (`vmagent`)
+- **Grafana Agent / Grafana Alloy**
+- **OpenTelemetry Collector** (`prometheus` receiver)
+- **Datadog Agent** (Prometheus check)
+- **Vector** (`prometheus_scrape` source)
 
-> **Authentication Note:** The `bearer_token` in `prometheus.yml` must match the cluster shared secret (`peer.token` in `config.yaml`, or `${HA_TOKEN}` environment variable).
+---
+
+### 1. Scraper Option A: Prometheus Server
+
+Configure your remote `prometheus.yml` to scrape each node:
+
+> **Authentication Note:** The `bearer_token` must match the cluster shared secret (`peer.token` in `config.yaml`, or `${HA_TOKEN}` environment variable).
 
 ```yaml
 scrape_configs:
@@ -263,7 +276,62 @@ scrape_configs:
           cluster: 'dns-production'
 ```
 
-### 2. Exported Prometheus Metrics
+---
+
+### 2. Scraper Option B: Telegraf (Exporting to InfluxDB v1 & v2/v3)
+
+Telegraf can scrape the `/metrics` endpoint using the `inputs.prometheus` plugin and send metrics directly to **InfluxDB v1.x** or **InfluxDB v2.x / v3 / Cloud**.
+
+Add the following configuration to `/etc/telegraf/telegraf.conf`:
+
+```toml
+# ==============================================================================
+# INPUT PLUGIN: Scrape dns-ha-agent Prometheus endpoint
+# ==============================================================================
+[[inputs.prometheus]]
+  ## List of dns-ha-agent metrics endpoints to scrape
+  urls = [
+    "http://10.0.0.1:8845/metrics",
+    "http://10.0.0.2:8845/metrics"
+  ]
+
+  ## Scrape interval & timeout
+  interval = "5s"
+  response_timeout = "3s"
+
+  ## Bearer token authorization (must match peer.token / HA_TOKEN)
+  bearer_token_string = "SuperSecretClusterToken123"
+
+  ## Metric structure version (version 2 recommended for InfluxDB)
+  metric_version = 2
+
+  ## Optional static tags for identification
+  [inputs.prometheus.tags]
+    cluster = "dns-production"
+
+# ==============================================================================
+# OUTPUT PLUGIN OPTION 1: InfluxDB v1.x
+# ==============================================================================
+[[outputs.influxdb]]
+  urls = ["http://influxdb.example.com:8086"]
+  database = "telemetry"
+  skip_database_creation = false
+  # username = "telegraf"
+  # password = "secretpassword"
+
+# ==============================================================================
+# OUTPUT PLUGIN OPTION 2: InfluxDB v2.x / v3 / Cloud
+# ==============================================================================
+[[outputs.influxdb_v2]]
+  urls = ["http://influxdb2.example.com:8086"]
+  token = "YOUR_INFLUXDB_V2_API_TOKEN"
+  organization = "my-org"
+  bucket = "dns-ha-metrics"
+```
+
+---
+
+### 3. Exported Prometheus Metrics
 
 | Metric | Type | Description |
 |---|---|---|
@@ -275,15 +343,17 @@ scrape_configs:
 | `dns_ha_check_status{check="process\|tcp\|udp\|dns"}` | Gauge | Status of individual check (`1` = OK, `0` = FAIL) |
 | `dns_ha_check_rtt_seconds{check="dns"}` | Gauge | DNS query round-trip latency in seconds |
 
-### 3. Grafana Dashboard Setup (v7+ / v8 / v9 / v10 / Latest)
+---
+
+### 4. Grafana Dashboard Setup (v7+ / v8 / v9 / v10 / Latest)
 
 A pre-built, production-ready Grafana dashboard JSON template is included at [`docs/grafana-dashboard.json`](file:///c:/4life/dns-ha-agent/docs/grafana-dashboard.json).
 
 **How to Import into Grafana:**
 1. Open Grafana Web Interface (version 7.0+ or latest).
 2. Go to **Dashboards** → **New** → **Import**.
-3. Upload `docs/grafana-dashboard.json` or paste its raw JSON content.
-4. Select your **Prometheus Data Source** and click **Import**.
+3. Upload [`docs/grafana-dashboard.json`](file:///c:/4life/dns-ha-agent/docs/grafana-dashboard.json) or paste its raw JSON content.
+4. Select your **Prometheus Data Source** (or InfluxDB data source if using Telegraf + InfluxQL/Flux) and click **Import**.
 
 ---
 
