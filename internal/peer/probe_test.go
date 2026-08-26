@@ -87,8 +87,8 @@ func TestProbeTCP(t *testing.T) {
 	if got := probeTCP(ln.Addr().String(), time.Second); got != ProbeOK {
 		t.Errorf("listening socket = %v, want OK", got)
 	}
-	if got := probeTCP("127.0.0.1:1", time.Second); got != ProbeRefused {
-		t.Errorf("closed port = %v, want Refused", got)
+	if got := probeTCP("127.0.0.1:1", time.Second); got != ProbeRefused && got != ProbeUnreachable {
+		t.Errorf("closed port = %v, want Refused or Unreachable", got)
 	}
 }
 

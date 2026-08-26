@@ -23,6 +23,9 @@ type HeartbeatServer struct {
 }
 
 func NewHeartbeatServer(token string, peerTokens []string, vipIface string, vhid int, healthFn func() health.HealthResult, log *slog.Logger) *HeartbeatServer {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	tokens := make(map[string]bool)
 	if token != "" {
 		tokens[token] = true

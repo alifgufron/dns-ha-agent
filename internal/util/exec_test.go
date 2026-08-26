@@ -1,6 +1,7 @@
 package util
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,9 @@ func TestPingRTT(t *testing.T) {
 }
 
 func TestPingHostLocalhost(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping ping command test on Windows (BSD-style flags used)")
+	}
 	ok, detail := PingHost("127.0.0.1", 2*time.Second)
 	if !ok {
 		t.Fatalf("PingHost(127.0.0.1) failed: %q", detail)

@@ -192,7 +192,7 @@ func TestBindAddressListAndValidate(t *testing.T) {
 		CARP: CARPConfig{DemotionHealthy: 0, DemotionDegraded: 50, DemotionUnhealthy: 255},
 		Peer: PeerConfig{Enabled: false},
 	}
-	err := validate(cfg)
+	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected error on invalid bind_addresses, got nil")
 	}

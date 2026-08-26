@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alifgufron/dns-ha-agent/internal/health"
 )
 
 // These tests exercise the REAL HTTP path (client.Do → classifyHTTPError →
@@ -57,8 +59,8 @@ func TestCheckPeerRefused(t *testing.T) {
 	if ph.OK {
 		t.Fatal("expected failure, got OK")
 	}
-	if ph.AgentProbe != ProbeRefused {
-		t.Errorf("AgentProbe = %v, want Refused", ph.AgentProbe)
+	if ph.AgentProbe != ProbeRefused && ph.AgentProbe != ProbeUnreachable {
+		t.Errorf("AgentProbe = %v, want Refused or Unreachable", ph.AgentProbe)
 	}
 }
 

@@ -19,7 +19,7 @@ import (
 	"github.com/alifgufron/dns-ha-agent/internal/peer"
 )
 
-const Version = "1.1.0"
+const Version = "1.0.0"
 
 func logToSyslog(tag, msg string) {
 	exec.Command("logger", "-t", tag, msg).Run()
@@ -53,6 +53,13 @@ func main() {
 		case "status":
 			runStatusCmd(os.Args[2:])
 			return
+		default:
+			// Skip flags like -config, -t which are handled by flag.Parse below
+			if !strings.HasPrefix(os.Args[1], "-") {
+				fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\n", os.Args[1])
+				printHelp()
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -175,14 +182,12 @@ func runCheckCmd(args []string) {
 
 	state := agent.StateFromScore(res.Score)
 
-	fmt.Println("\n┌────────────────────────────────────────────────────────┐")
-	fmt.Printf("│  DNS Health Check Report (%-28s) │\n", elapsed.Round(time.Millisecond))
-	fmt.Println("├──────────────────────────┬────────┬────────────────────┤")
-	fmt.Printf("│ %-24s │ %-6s │ %-18s │\n", "Check", "Status", "Detail / Weight")
-	fmt.Println("├──────────────────────────┼────────┼────────────────────┤")
-	fmt.Printf("│ %-24s │ %-6s │ %-18s │\n", "Process ("+strings.Join(healthCfg.ProcessNames, ",")+")", sym(res.ProcessAlive), fmt.Sprintf("weight: %d", healthCfg.ProcessWeight))
-	fmt.Printf("│ %-24s │ %-6s │ %-18s │\n", "TCP :53", sym(res.TCPAlive), fmt.Sprintf("weight: %d", healthCfg.TCPWeight))
-	fmt.Printf("│ %-24s │ %-6s │ %-18s │\n", "UDP :53", sym(res.UDPAlive), fmt.Sprintf("weight: %d", healthCfg.UDPWeight))
+	// Build all row data first so we can calculate column widths dynamically
+	type row struct {
+		check  string
+		status string
+		detail string
+	}
 
 	dnsDetail := fmt.Sprintf("weight: %d", healthCfg.DNSWeight)
 	if healthCfg.DNSEnabled {
@@ -192,17 +197,68 @@ func runCheckCmd(args []string) {
 			dnsDetail = fmt.Sprintf("RTT: %v (weight: %d)", res.DNSDetail.RTT.Round(time.Millisecond), healthCfg.DNSWeight)
 		} else if res.DNSDetail.Error != "" {
 			dnsDetail = res.DNSDetail.Error
-			if len(dnsDetail) > 18 {
-				dnsDetail = dnsDetail[:15] + "..."
-			}
 		}
 	} else {
 		dnsDetail = "disabled"
 	}
-	fmt.Printf("│ %-24s │ %-6s │ %-18s │\n", "DNS Query ("+healthCfg.DNSRecordType+")", sym(res.DNSAlive), dnsDetail)
-	fmt.Println("├──────────────────────────┴────────┴────────────────────┤")
-	fmt.Printf("│ Score: %-3d / 100  (Raw: %d/%d)   State: %-14s │\n", res.Score, res.RawScore, res.MaxScore, state.String())
-	fmt.Println("└────────────────────────────────────────────────────────┘\n")
+
+	rows := []row{
+		{"Process (" + strings.Join(healthCfg.ProcessNames, ",") + ")", sym(res.ProcessAlive), fmt.Sprintf("weight: %d", healthCfg.ProcessWeight)},
+		{"TCP :53", sym(res.TCPAlive), fmt.Sprintf("weight: %d", healthCfg.TCPWeight)},
+		{"UDP :53", sym(res.UDPAlive), fmt.Sprintf("weight: %d", healthCfg.UDPWeight)},
+		{"DNS Query (" + healthCfg.DNSRecordType + ")", sym(res.DNSAlive), dnsDetail},
+	}
+
+	// Calculate minimum column widths from headers
+	col1 := len("Check")
+	col2 := len("Status")
+	col3 := len("Detail / Weight")
+	for _, r := range rows {
+		if len(r.check) > col1 {
+			col1 = len(r.check)
+		}
+		if len(r.status) > col2 {
+			col2 = len(r.status)
+		}
+		if len(r.detail) > col3 {
+			col3 = len(r.detail)
+		}
+	}
+
+	// Total inner width = col1 + col2 + col3 + separators (" │ " = 3 each, 2 of them = 6) + 2 outer padding
+	innerWidth := col1 + col2 + col3 + 10 // 2(pad) + 3(sep) + 3(sep) + 2(pad)
+
+	// Build the summary line and ensure the table is wide enough for it
+	summaryContent := fmt.Sprintf("Score: %-3d / 100  (Raw: %d/%d)   State: %s", res.Score, res.RawScore, res.MaxScore, state.String())
+	if len(summaryContent)+2 > innerWidth { // +2 for left/right padding
+		innerWidth = len(summaryContent) + 2
+	}
+
+	// Build the header line and ensure the table is wide enough for it
+	headerContent := fmt.Sprintf("DNS Health Check Report (%s)", elapsed.Round(time.Millisecond))
+	if len(headerContent)+4 > innerWidth { // +4 for extra padding
+		innerWidth = len(headerContent) + 4
+	}
+
+	// Recalculate col3 to fill remaining space
+	col3 = innerWidth - col1 - col2 - 10
+	if col3 < len("Detail / Weight") {
+		col3 = len("Detail / Weight")
+		innerWidth = col1 + col2 + col3 + 10
+	}
+
+	hLine := strings.Repeat("─", innerWidth)
+	fmt.Printf("\n┌%s┐\n", hLine)
+	fmt.Printf("│  %-*s  │\n", innerWidth-4, headerContent)
+	fmt.Printf("├%s┼%s┼%s┤\n", strings.Repeat("─", col1+2), strings.Repeat("─", col2+2), strings.Repeat("─", col3+2))
+	fmt.Printf("│ %-*s │ %-*s │ %-*s │\n", col1, "Check", col2, "Status", col3, "Detail / Weight")
+	fmt.Printf("├%s┼%s┼%s┤\n", strings.Repeat("─", col1+2), strings.Repeat("─", col2+2), strings.Repeat("─", col3+2))
+	for _, r := range rows {
+		fmt.Printf("│ %-*s │ %-*s │ %-*s │\n", col1, r.check, col2, r.status, col3, r.detail)
+	}
+	fmt.Printf("├%s┴%s┴%s┤\n", strings.Repeat("─", col1+2), strings.Repeat("─", col2+2), strings.Repeat("─", col3+2))
+	fmt.Printf("│ %-*s │\n", innerWidth-4, summaryContent)
+	fmt.Printf("└%s┘\n\n", hLine)
 }
 
 func runStatusCmd(args []string) {
@@ -216,7 +272,7 @@ func runStatusCmd(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Println("Collecting local node & peer status...\n")
+	fmt.Print("Collecting local node & peer status...\n\n")
 
 	nodeIP, _ := carp.GetNodeIP(cfg.Agent.Interface)
 	vip, _ := carp.GetVIP(cfg.Agent.VIPInterface, cfg.Agent.VHID)
