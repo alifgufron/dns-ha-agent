@@ -13,22 +13,22 @@
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
+  "graphTooltip": 2,
   "id": null,
   "links": [],
-  "liveNow": false,
+  "liveNow": true,
   "panels": [
     {
       "collapsed": false,
       "gridPos": {
-        "h": 4,
+        "h": 6,
         "w": 6,
         "x": 0,
         "y": 0
       },
       "id": 1,
-      "title": "Health Score",
-      "type": "stat",
+      "title": "Node Health Score",
+      "type": "gauge",
       "datasource": {
         "type": "influxdb",
         "uid": "${DS_INFLUXDB}"
@@ -50,26 +50,35 @@
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "green", "value": 80 }
+              { "color": "#EF4444", "value": null },
+              { "color": "#F59E0B", "value": 50 },
+              { "color": "#10B981", "value": 80 }
             ]
           },
           "unit": "none"
         },
         "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
       }
     },
     {
       "collapsed": false,
       "gridPos": {
-        "h": 4,
+        "h": 6,
         "w": 6,
         "x": 6,
         "y": 0
@@ -101,8 +110,8 @@
           "mappings": [
             {
               "options": {
-                "0": { "color": "gray", "index": 0, "text": "BACKUP / STANDBY" },
-                "1": { "color": "green", "index": 1, "text": "ACTIVE MASTER" }
+                "0": { "color": "#4B5563", "index": 0, "text": "STANDBY / BACKUP" },
+                "1": { "color": "#10B981", "index": 1, "text": "ACTIVE MASTER" }
               },
               "type": "value"
             }
@@ -110,24 +119,36 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "gray", "value": null },
-              { "color": "green", "value": 1 }
+              { "color": "#4B5563", "value": null },
+              { "color": "#10B981", "value": 1 }
             ]
           }
         },
         "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name_and_value"
       }
     },
     {
       "collapsed": false,
       "gridPos": {
-        "h": 4,
+        "h": 6,
         "w": 6,
         "x": 12,
         "y": 0
       },
       "id": 3,
-      "title": "CARP Demotion",
+      "title": "CARP Demotion Penalty",
       "type": "stat",
       "datasource": {
         "type": "influxdb",
@@ -153,25 +174,37 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 100 }
+              { "color": "#10B981", "value": null },
+              { "color": "#F59E0B", "value": 1 },
+              { "color": "#EF4444", "value": 100 }
             ]
           }
         },
         "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       }
     },
     {
       "collapsed": false,
       "gridPos": {
-        "h": 4,
+        "h": 6,
         "w": 6,
         "x": 18,
         "y": 0
       },
       "id": 4,
-      "title": "Check Status (Process/TCP/UDP/DNS)",
+      "title": "CARP Priority (Advskew)",
       "type": "stat",
       "datasource": {
         "type": "influxdb",
@@ -183,8 +216,74 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "SELECT last(\"dns_ha_check_status\") FROM \"prometheus\" WHERE $timeFilter GROUP BY \"url\", \"check\"",
-          "alias": "$tag_url - $tag_check",
+          "query": "SELECT last(\"dns_ha_advskew\") FROM \"prometheus\" WHERE $timeFilter GROUP BY \"url\"",
+          "alias": "$tag_url",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#3B82F6", "value": null }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 10,
+      "title": "Subsystem Health Checks",
+      "type": "row"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 7
+      },
+      "id": 5,
+      "title": "DNS Daemon (named/dnsdist)",
+      "type": "stat",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
+          },
+          "query": "SELECT last(\"dns_ha_check_status\") FROM \"prometheus\" WHERE (\"check\" = 'process') AND $timeFilter GROUP BY \"url\"",
+          "alias": "$tag_url",
           "rawQuery": true,
           "refId": "A"
         }
@@ -197,8 +296,8 @@
           "mappings": [
             {
               "options": {
-                "0": { "color": "red", "index": 0, "text": "FAIL" },
-                "1": { "color": "green", "index": 1, "text": "OK" }
+                "0": { "color": "#EF4444", "index": 0, "text": "FAILED" },
+                "1": { "color": "#10B981", "index": 1, "text": "RUNNING" }
               },
               "type": "value"
             }
@@ -206,24 +305,240 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              { "color": "#EF4444", "value": null },
+              { "color": "#10B981", "value": 1 }
             ]
           }
         },
         "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name_and_value"
       }
     },
     {
       "collapsed": false,
       "gridPos": {
-        "h": 8,
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 7
+      },
+      "id": 6,
+      "title": "TCP Listener (:53)",
+      "type": "stat",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
+          },
+          "query": "SELECT last(\"dns_ha_check_status\") FROM \"prometheus\" WHERE (\"check\" = 'tcp') AND $timeFilter GROUP BY \"url\"",
+          "alias": "$tag_url",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "#EF4444", "index": 0, "text": "DOWN" },
+                "1": { "color": "#10B981", "index": 1, "text": "LISTENING" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#EF4444", "value": null },
+              { "color": "#10B981", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name_and_value"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 7
+      },
+      "id": 7,
+      "title": "UDP Listener (:53)",
+      "type": "stat",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
+          },
+          "query": "SELECT last(\"dns_ha_check_status\") FROM \"prometheus\" WHERE (\"check\" = 'udp') AND $timeFilter GROUP BY \"url\"",
+          "alias": "$tag_url",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "#EF4444", "index": 0, "text": "DOWN" },
+                "1": { "color": "#10B981", "index": 1, "text": "LISTENING" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#EF4444", "value": null },
+              { "color": "#10B981", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name_and_value"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 7
+      },
+      "id": 8,
+      "title": "DNS Query Resolution Probe",
+      "type": "stat",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
+          },
+          "query": "SELECT last(\"dns_ha_check_status\") FROM \"prometheus\" WHERE (\"check\" = 'dns') AND $timeFilter GROUP BY \"url\"",
+          "alias": "$tag_url",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "#EF4444", "index": 0, "text": "FAILED" },
+                "1": { "color": "#10B981", "index": 1, "text": "RESOLVED" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#EF4444", "value": null },
+              { "color": "#10B981", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name_and_value"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
         "w": 24,
         "x": 0,
-        "y": 4
+        "y": 11
       },
-      "id": 5,
-      "title": "DNS Query RTT Latency (ms)",
+      "id": 11,
+      "title": "Performance & SLA Metrics Trends",
+      "type": "row"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 12
+      },
+      "id": 9,
+      "title": "DNS Query Round-Trip Latency (ms)",
       "type": "timeseries",
       "datasource": {
         "type": "influxdb",
@@ -245,15 +560,134 @@
         "defaults": {
           "custom": {
             "drawStyle": "line",
-            "lineInterpolation": "smooth"
+            "fillOpacity": 15,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 100 }
+            ]
           },
           "unit": "ms"
         },
         "overrides": []
       }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "id": 12,
+      "title": "Historical Health Score",
+      "type": "timeseries",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
+          },
+          "query": "SELECT last(\"dns_ha_health_score\") FROM \"prometheus\" WHERE $timeFilter GROUP BY time($__interval), \"url\" fill(null)",
+          "alias": "$tag_url",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#EF4444", "value": null },
+              { "color": "#F59E0B", "value": 50 },
+              { "color": "#10B981", "value": 80 }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 13,
+      "title": "CARP Role State Timeline",
+      "type": "row"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "id": 14,
+      "title": "CARP Master / Standby Timeline",
+      "type": "state-timeline",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
+          },
+          "query": "SELECT last(\"dns_ha_carp_role\") FROM \"prometheus\" WHERE (\"role\" = 'MASTER') AND $timeFilter GROUP BY time($__interval), \"url\" fill(previous)",
+          "alias": "$tag_url",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "#4B5563", "index": 0, "text": "STANDBY" },
+                "1": { "color": "#10B981", "index": 1, "text": "MASTER" }
+              },
+              "type": "value"
+            }
+          ]
+        },
+        "overrides": []
+      }
     }
   ],
-  "schemaVersion": 38,
+  "refresh": "5s",
+  "schemaVersion": 30,
   "style": "dark",
   "tags": ["dns", "freebsd", "carp", "ha", "telegraf", "influxdb"],
   "time": {
@@ -262,6 +696,6 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "DNS HA Agent - Telegraf InfluxDB Dashboard",
+  "title": "DNS HA Agent — FreeBSD CARP Cluster (Telegraf InfluxDB)",
   "uid": "dns-ha-agent-influxdb"
 }
