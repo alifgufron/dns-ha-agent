@@ -11,6 +11,7 @@ agent:
   interface: "vtnet0"          # management — for node IP and peer comms
   vip_interface: "vtnet1"      # VIP/CARP — controlled up/down to trigger failover
   vhid: 1
+  recovery_confirm: 5          # stable checks required before reclaiming the VIP
   state_file: "/var/db/dns-ha-agent.state"
 
 health:
@@ -39,7 +40,7 @@ peer:
   bind: "10.0.0.1"                  # management IP — listen on this IP
   port: ":8845"                     # port — MUST be identical on all nodes
   token: "${HA_TOKEN}"              # token — MUST be identical on all nodes
-  ping: false                       # ICMP check on heartbeat failure
+  dns_port: "53"                    # peer DNS port for the fallback probe (default 53)
   tls:
     enabled: false
     cert_file: "/usr/local/etc/dns-ha-agent.crt"
@@ -70,6 +71,7 @@ notify:
     bot_token: "${TELEGRAM_TOKEN}"
     chat_id: "123456789"
   cooldown: 5m
+  confirm: 3                        # consecutive cycles a state must hold before the email fires
   vip_loss_alert: true
 ```
 
@@ -85,15 +87,20 @@ notify:
 | `agent.interface` | Management interface — node IP, peer comms. Always UP. Typically `vtnet0` |
 | `agent.vip_interface` | VIP/CARP interface — **UP** healthy, **DOWN** unhealthy (triggers failover). Typically `vtnet1` |
 | `agent.vhid` | CARP VHID, must match `/etc/rc.conf` |
+| `agent.recovery_confirm` | **Preempt mode only.** Consecutive intervals a recovered node must be *fully* healthy (every enabled check passing) before it reclaims the VIP. Default `3`. `0` disables the wait. See usage.md → "Recovery confirmation" |
 | `agent.state_file` | Optional. Persists last state so a restart resumes cleanly (no stale-transition emails) |
 | `health.process_check` | Check DNS process(es) via pgrep. Uses `process_names` |
 | `health.process_names` | **List** of processes for `pgrep -x`. All must be alive. `["dnsdist"]`, `["named"]`, `["dnsdist","named"]`. Legacy single `process_name` also accepted |
 | `health.tcp_check` | TCP port :53 connectivity |
 | `health.udp_check` | UDP port :53 via DNS query. Uses `dns_query.domain`; only checks that a valid DNS response returns (rcode ignored), so authoritative-only servers pass |
-| `health.dns_query` | DNS query check (`enabled`, `domain`, `timeout`) |
+| `health.dns_query` | DNS query check (`enabled`, `domain`, `domains`, `record_type`, `timeout`, `latency_threshold`) |
 | `health.bind_address` | Where the DNS server listens (default `127.0.0.1:53`) |
+| `health.bind_addresses` | Optional list of DNS listen addresses for dual-stack IPv4/IPv6 (`["127.0.0.1:53", "[::1]:53"]`). If configured, all addresses are probed |
 | `health.weights` | Weight per check (`process`/`tcp`/`udp`/`dns`), default 25/25/25/25. 0 = no score (use `*_check` flags to fully disable). Weights need not sum to 100 — the score is normalized to 0-100 against the sum of enabled weights |
-| `health.dns_query.domain` | Domain to query. For an authoritative-only server (BIND9 without recursion) use a zone it actually serves, otherwise the check gets REFUSED and fails |
+| `health.dns_query.domain` | Primary domain to query. For an authoritative-only server (BIND9 without recursion) use a zone it actually serves, otherwise the check gets REFUSED and fails |
+| `health.dns_query.domains` | Optional list of domains to query (`["google.com", "example.com"]`). If provided, all domains are queried and average RTT is computed |
+| `health.dns_query.record_type` | Optional DNS RR type to query (default `"A"`, supports `"AAAA"`, `"SOA"`, `"TXT"`, `"MX"`, `"NS"`, `"PTR"`, `"SRV"`, `"CNAME"`) |
+| `health.dns_query.latency_threshold` | Optional SLA threshold (e.g. `300ms`). If query succeeds but RTT exceeds threshold, awards 50% DNS weight as a latency SLA penalty |
 | `carp.demotion_healthy` | Demotion when HEALTHY (default 0) |
 | `carp.demotion_degraded` | Demotion when DEGRADED (default 50) |
 | `carp.demotion_unhealthy` | Demotion when UNHEALTHY (default 255) |
@@ -101,14 +108,15 @@ notify:
 | `peer.bind` | HTTP listen IP — own management IP. **Differs per node** |
 | `peer.port` | Listen port, `:PORT` (e.g. `":8845"`). **MUST be identical on all nodes** |
 | `peer.token` | Shared secret (`${ENV_VAR}` supported). **MUST be identical on all nodes** |
-| `peer.ping` | ICMP ping on heartbeat failure to classify: "host DOWN/RTO" vs "host UP, service DOWN" |
 | `peer.tls` | TLS for peer HTTP (`enabled`, `cert_file`, `key_file`). All nodes need certs; peers query `https://` |
 | `peer.peers` | Other nodes: `ip`, `name`, optional pairwise `token` (overrides global for this pair) |
+| `peer.dns_port` | Peer's DNS port, probed (TCP+UDP) only when the heartbeat fails. Default `53` |
 | `policy.mode` | `"preempt"` (default) or `"sticky"`. **MUST be `"preempt"`** for MASTER reclaim. `"sticky"` never steps down |
 | `notify.email.*` | SMTP config (`enabled`, `smtp_host`, `smtp_port`, `username`, `password`, `from`, `to`) |
 | `notify.slack` | Optional Slack webhook (`enabled`, `webhook_url`) |
 | `notify.telegram` | Optional Telegram bot (`enabled`, `bot_token`, `chat_id`) |
 | `notify.cooldown` | Minimum interval between notifications **of the same kind** (per-key: transition / `peer:<ip>:<status>` / `vip-loss`), not a global mute. Default `5m`. See usage.md |
+| `notify.confirm` | Consecutive cycles a state must hold before a state-change notification fires. Debounces transient dips (e.g. a restart showing score 25 for one cycle); **does not** delay failover, which the CARP decision drives immediately. Default `3` (≈10s at a 5s interval), `0` = default |
 | `notify.vip_loss_alert` | Alert if a node loses the VIP with no peer entitled to take it (split-brain guard). Role-neutral: same value on every node. Default `true`. (`master_loss_alert` still accepted as a legacy alias) |
 
 ---

@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/alifgufron/dns-ha-agent/internal/util"
 )
 
 const defaultTemplate = `DNS HA Agent — State Change
@@ -90,12 +91,11 @@ func generateReason(processOK, tcpOK, udpOK, dnsOK bool) string {
 }
 
 func getCarpArpLog() string {
-	cmd := exec.Command("sh", "-c", "grep -E 'carp:|arp:' /var/log/messages 2>/dev/null | tail -10")
-	out, err := cmd.Output()
-	if err != nil || len(out) == 0 {
+	res := util.ExecTimeout(2*time.Second, "sh", "-c", "grep -E 'carp:|arp:' /var/log/messages 2>/dev/null | tail -10")
+	if res.Err != nil || len(res.Stdout) == 0 {
 		return "  (no recent CARP/ARP messages)"
 	}
-	return "  " + strings.TrimSpace(strings.ReplaceAll(string(out), "\n", "\n  "))
+	return "  " + strings.TrimSpace(strings.ReplaceAll(res.Stdout, "\n", "\n  "))
 }
 
 func RenderNotification(newState, oldState string, score, demotion int, nodeIP, vip, carpState, mgmtIface, vipIface string, processOK, tcpOK, udpOK, dnsOK bool) (string, string) {
@@ -218,15 +218,45 @@ Score:     {{.LocalScore}}/100
 CARP:      {{.LocalCarp}}
 
 ── Peer ({{.PeerName}}) ──
-Peer IP:   {{.PeerIP}}
-Status:    {{.Status}}
-Error:     {{.Error}}
-
+Peer IP:      {{.PeerIP}}
+Status:       {{.Status}}
+{{if .Diagnosis}}Diagnosis:    {{.Diagnosis}}
+{{end}}{{if .LastCarp}}Last CARP:    {{.LastCarp}}
+{{end}}{{if .Probes}}Probes:{{.Probes}}
+{{end}}{{if .Error}}Error:        {{.Error}}
+{{end}}
 Recent CARP/ARP messages from /var/log/messages:
 {{.CarpArpLog}}
 
 This is an automated notification from dns-ha-agent.
 `
+
+// PeerProbeInfo carries the fallback probe results that explain WHY a peer's
+// heartbeat failed. Plain strings keep the notify package independent of the
+// peer package.
+type PeerProbeInfo struct {
+	Diagnosis  string // human conclusion: hung, host down, agent down, ...
+	LastCarp   string // CARP state the peer last reported while healthy
+	Ping       string // ICMP probe result (RTT or error)
+	AgentProbe string // agent heartbeat port probe result
+	TCP53      string // TCP :53 probe result
+	UDP53      string // UDP :53 (DNS query) probe result
+}
+
+// formatProbes renders the probe detail block, omitting probes that never ran.
+func formatProbes(info PeerProbeInfo) string {
+	var b strings.Builder
+	write := func(label, v string) {
+		if v != "" {
+			b.WriteString("\n" + label + v)
+		}
+	}
+	write("Agent HTTP:  ", info.AgentProbe)
+	write("ICMP:        ", info.Ping)
+	write("TCP :53:     ", info.TCP53)
+	write("UDP :53:     ", info.UDP53)
+	return b.String()
+}
 
 type PeerNotificationData struct {
 	Timestamp  string
@@ -239,10 +269,13 @@ type PeerNotificationData struct {
 	PeerIP     string
 	Status     string
 	Error      string
+	Diagnosis  string
+	LastCarp   string
+	Probes     string
 	CarpArpLog string
 }
 
-func RenderPeerNotification(status, peerName, peerIP, errorMsg string, localScore int, localState, localCarp, nodeIP string) (string, string) {
+func RenderPeerNotification(status, peerName, peerIP, errorMsg string, localScore int, localState, localCarp, nodeIP string, info PeerProbeInfo) (string, string) {
 	hostname, _ := os.Hostname()
 
 	data := PeerNotificationData{
@@ -256,6 +289,9 @@ func RenderPeerNotification(status, peerName, peerIP, errorMsg string, localScor
 		PeerIP:     peerIP,
 		Status:     status,
 		Error:      errorMsg,
+		Diagnosis:  info.Diagnosis,
+		LastCarp:   info.LastCarp,
+		Probes:     formatProbes(info),
 		CarpArpLog: getCarpArpLog(),
 	}
 

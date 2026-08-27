@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -22,10 +23,30 @@ func Validate(cfg *Config) error {
 	if cfg.Agent.VIPInterface == "" {
 		errs = append(errs, errors.New("agent.vip_interface is required"))
 	}
+	if cfg.Agent.RecoveryConfirm < 0 {
+		errs = append(errs, fmt.Errorf("agent.recovery_confirm must be >= 0, got %d", cfg.Agent.RecoveryConfirm))
+	}
 
 	if cfg.Health.DNSQuery.Enabled {
-		if cfg.Health.DNSQuery.Domain == "" {
-			errs = append(errs, errors.New("health.dns_query.domain is required when enabled"))
+		if len(cfg.Health.DNSQuery.Domains) == 0 && cfg.Health.DNSQuery.Domain == "" {
+			errs = append(errs, errors.New("health.dns_query.domain or health.dns_query.domains is required when enabled"))
+		}
+		for _, d := range cfg.Health.DNSQuery.Domains {
+			if strings.TrimSpace(d) == "" {
+				errs = append(errs, errors.New("health.dns_query.domains contains an empty domain"))
+			}
+		}
+		if cfg.Health.DNSQuery.LatencyThreshold < 0 {
+			errs = append(errs, fmt.Errorf("health.dns_query.latency_threshold must be >= 0, got %v", cfg.Health.DNSQuery.LatencyThreshold))
+		}
+		if rt := cfg.Health.DNSQuery.RecordType; rt != "" {
+			validTypes := map[string]bool{
+				"A": true, "AAAA": true, "CNAME": true, "TXT": true, "MX": true,
+				"NS": true, "SOA": true, "PTR": true, "SRV": true,
+			}
+			if !validTypes[strings.ToUpper(rt)] {
+				errs = append(errs, fmt.Errorf("health.dns_query.record_type %q is invalid (supported: A, AAAA, CNAME, TXT, MX, NS, SOA, PTR, SRV)", rt))
+			}
 		}
 	}
 
@@ -33,6 +54,16 @@ func Validate(cfg *Config) error {
 		_, _, err := net.SplitHostPort(cfg.Health.BindAddress)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("health.bind_address %q is not valid host:port", cfg.Health.BindAddress))
+		}
+	}
+	for i, addr := range cfg.Health.BindAddresses {
+		if strings.TrimSpace(addr) == "" {
+			errs = append(errs, fmt.Errorf("health.bind_addresses[%d] is empty", i))
+			continue
+		}
+		_, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("health.bind_addresses[%d] %q is not valid host:port", i, addr))
 		}
 	}
 
@@ -94,6 +125,12 @@ func Validate(cfg *Config) error {
 			errs = append(errs, fmt.Errorf("peer.port %q must start with ':' (e.g. \":8845\")", cfg.Peer.Port))
 		}
 
+		if cfg.Peer.DNSPort != "" {
+			if port, err := strconv.Atoi(cfg.Peer.DNSPort); err != nil || port < 1 || port > 65535 {
+				errs = append(errs, fmt.Errorf("peer.dns_port %q is not a valid port number", cfg.Peer.DNSPort))
+			}
+		}
+
 		// port and token must be same on all nodes (documentation note, validated per-node)
 
 		for i, p := range cfg.Peer.Peers {
@@ -139,6 +176,10 @@ func Validate(cfg *Config) error {
 
 	if cfg.Notify.Cooldown <= 0 {
 		errs = append(errs, errors.New("notify.cooldown must be positive"))
+	}
+
+	if cfg.Notify.Confirm < 0 {
+		errs = append(errs, fmt.Errorf("notify.confirm must be >= 0 (0 = default), got %d", cfg.Notify.Confirm))
 	}
 
 	return errors.Join(errs...)

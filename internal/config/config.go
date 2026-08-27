@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -27,17 +28,22 @@ type AgentConfig struct {
 	VIPInterface string        `yaml:"vip_interface"`
 	VHID         int           `yaml:"vhid"`
 	StateFile    string        `yaml:"state_file"`
+	// RecoveryConfirm is how many consecutive fully-healthy intervals a node
+	// whose VIP interface is down must pass before it reclaims the VIP.
+	// Zero means "unset" and falls back to DefaultRecoveryConfirm.
+	RecoveryConfirm int `yaml:"recovery_confirm"`
 }
 
 type HealthConfig struct {
-	ProcessCheck bool          `yaml:"process_check"`
-	ProcessName  string        `yaml:"process_name"`
-	ProcessNames []string      `yaml:"process_names"`
-	TCPCheck     bool          `yaml:"tcp_check"`
-	UDPCheck     bool          `yaml:"udp_check"`
-	DNSQuery     DNSQuery      `yaml:"dns_query"`
-	BindAddress  string        `yaml:"bind_address"`
-	Weights      WeightsConfig `yaml:"weights"`
+	ProcessCheck  bool          `yaml:"process_check"`
+	ProcessName   string        `yaml:"process_name"`
+	ProcessNames  []string      `yaml:"process_names"`
+	TCPCheck      bool          `yaml:"tcp_check"`
+	UDPCheck      bool          `yaml:"udp_check"`
+	DNSQuery      DNSQuery      `yaml:"dns_query"`
+	BindAddress   string        `yaml:"bind_address"`
+	BindAddresses []string      `yaml:"bind_addresses"`
+	Weights       WeightsConfig `yaml:"weights"`
 }
 
 type WeightsConfig struct {
@@ -59,10 +65,42 @@ func (h HealthConfig) ProcessList() []string {
 	return []string{"dnsdist"}
 }
 
+// BindAddressList returns all DNS bind addresses to check, honoring
+// bind_addresses (list), falling back to bind_address (single), then default.
+func (h HealthConfig) BindAddressList() []string {
+	if len(h.BindAddresses) > 0 {
+		return h.BindAddresses
+	}
+	if h.BindAddress != "" {
+		return []string{h.BindAddress}
+	}
+	return []string{"127.0.0.1:53"}
+}
+
 type DNSQuery struct {
-	Enabled bool          `yaml:"enabled"`
-	Domain  string        `yaml:"domain"`
-	Timeout time.Duration `yaml:"timeout"`
+	Enabled          bool          `yaml:"enabled"`
+	Domain           string        `yaml:"domain"`
+	Domains          []string      `yaml:"domains"`
+	RecordType       string        `yaml:"record_type"`
+	Timeout          time.Duration `yaml:"timeout"`
+	LatencyThreshold time.Duration `yaml:"latency_threshold"`
+}
+
+func (d DNSQuery) DomainList() []string {
+	if len(d.Domains) > 0 {
+		return d.Domains
+	}
+	if d.Domain != "" {
+		return []string{d.Domain}
+	}
+	return []string{"google.com"}
+}
+
+func (d DNSQuery) Type() string {
+	if d.RecordType != "" {
+		return strings.ToUpper(d.RecordType)
+	}
+	return "A"
 }
 
 type CARPConfig struct {
@@ -79,6 +117,10 @@ type PeerConfig struct {
 	Ping    bool            `yaml:"ping"`
 	TLS     TLSServerConfig `yaml:"tls"`
 	Peers   []PeerEntry     `yaml:"peers"`
+	// DNSPort is the peer's DNS port, probed only when a heartbeat fails, to
+	// tell "agent is down" apart from "the peer stopped serving DNS".
+	// Empty means 53.
+	DNSPort string `yaml:"dns_port"`
 }
 
 type TLSServerConfig struct {
@@ -87,9 +129,9 @@ type TLSServerConfig struct {
 	KeyFile  string `yaml:"key_file"`
 }
 
-// ListenAddr returns bind IP + port (e.g. "10.0.0.1:8080") for HTTP server
+// ListenAddr returns bind IP + port (e.g. "10.0.0.1:8080" or "[::1]:8080") for HTTP server
 func (p PeerConfig) ListenAddr() string {
-	return p.Bind + p.Port
+	return net.JoinHostPort(p.Bind, p.PortNum())
 }
 
 // PortNum returns just the port number (e.g. "8080") for peer client URLs
@@ -120,6 +162,11 @@ type NotifyConfig struct {
 	Slack    SlackConfig    `yaml:"slack"`
 	Telegram TelegramConfig `yaml:"telegram"`
 	Cooldown time.Duration  `yaml:"cooldown"`
+	// Confirm is how many consecutive cycles a state must hold before a
+	// state-change notification is sent. It debounces transient dips without
+	// delaying the actual failover, which is driven by the CARP decision.
+	// Zero means "unset" and falls back to DefaultNotifyConfirm.
+	Confirm int `yaml:"confirm"`
 	// VIPLossAlert warns when this node loses the VIP with no peer entitled to
 	// take it. Role-neutral by design: every node runs the same config and
 	// watches only its own VIP, whichever role it happens to hold.
@@ -153,20 +200,20 @@ type EmailConfig struct {
 var envPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 var knownKeys = map[string]map[string]bool{
-	"agent":     {"interval": true, "interface": true, "vip_interface": true, "vhid": true, "state_file": true},
+	"agent":     {"interval": true, "interface": true, "vip_interface": true, "vhid": true, "state_file": true, "recovery_confirm": true},
 	"log_file":  {},
 	"log_level": {},
-	"health":    {"process_check": true, "process_name": true, "process_names": true, "tcp_check": true, "udp_check": true, "dns_query": true, "bind_address": true, "weights": true},
+	"health":    {"process_check": true, "process_name": true, "process_names": true, "tcp_check": true, "udp_check": true, "dns_query": true, "bind_address": true, "bind_addresses": true, "weights": true},
 	"carp":      {"demotion_healthy": true, "demotion_degraded": true, "demotion_unhealthy": true},
-	"peer":      {"enabled": true, "bind": true, "port": true, "token": true, "ping": true, "tls": true, "peers": true},
+	"peer":      {"enabled": true, "bind": true, "port": true, "token": true, "ping": true, "tls": true, "peers": true, "dns_port": true},
 	"policy":    {"mode": true},
 	// master_loss_alert is the pre-rename name of vip_loss_alert, still accepted
 	// so an already-installed config keeps working after an upgrade.
-	"notify": {"email": true, "slack": true, "telegram": true, "cooldown": true, "vip_loss_alert": true, "master_loss_alert": true},
+	"notify": {"email": true, "slack": true, "telegram": true, "cooldown": true, "confirm": true, "vip_loss_alert": true, "master_loss_alert": true},
 }
 
 var nestedKeys = map[string]map[string]bool{
-	"dns_query":  {"enabled": true, "domain": true, "timeout": true},
+	"dns_query":  {"enabled": true, "domain": true, "domains": true, "record_type": true, "timeout": true, "latency_threshold": true},
 	"email":      {"enabled": true, "smtp_host": true, "smtp_port": true, "username": true, "password": true, "from": true, "to": true},
 	"weights":    {"process": true, "tcp": true, "udp": true, "dns": true},
 	"tls":        {"enabled": true, "cert_file": true, "key_file": true},
@@ -278,7 +325,7 @@ func checkUnknownKeys(node *yaml.Node, prefix string) []string {
 
 		case "agent":
 			if _, ok := knownKeys["agent"][key]; !ok {
-				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'agent:' — valid: interval, interface, vip_interface, vhid, state_file", keyNode.Line, key))
+				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'agent:' — valid: interval, interface, vip_interface, vhid, state_file, recovery_confirm", keyNode.Line, key))
 			}
 
 		case "health":
@@ -297,7 +344,7 @@ func checkUnknownKeys(node *yaml.Node, prefix string) []string {
 
 		case "peer":
 			if _, ok := knownKeys["peer"][key]; !ok {
-				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'peer:' — valid: enabled, bind, port, token, ping, tls, peers", keyNode.Line, key))
+				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'peer:' — valid: enabled, bind, port, token, ping, tls, peers, dns_port", keyNode.Line, key))
 			} else if key == "peers" && valNode.Kind == yaml.SequenceNode {
 				errs = append(errs, checkPeerEntries(valNode)...)
 			} else if key == "tls" && valNode.Kind == yaml.MappingNode {
@@ -311,7 +358,7 @@ func checkUnknownKeys(node *yaml.Node, prefix string) []string {
 
 		case "notify":
 			if _, ok := knownKeys["notify"][key]; !ok {
-				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'notify:' — valid: email, slack, telegram, cooldown, vip_loss_alert", keyNode.Line, key))
+				errs = append(errs, fmt.Sprintf("  line %d: unknown key %q under 'notify:' — valid: email, slack, telegram, cooldown, confirm, vip_loss_alert", keyNode.Line, key))
 			} else if key == "email" && valNode.Kind == yaml.MappingNode {
 				errs = append(errs, checkMappingKeys(valNode, "email")...)
 			} else if key == "slack" && valNode.Kind == yaml.MappingNode {

@@ -50,9 +50,13 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 		timeout = cfg.Timeout
 	}
 
-	address := "127.0.0.1:53"
-	if cfg.BindAddress != "" {
-		address = cfg.BindAddress
+	addresses := cfg.BindAddresses
+	if len(addresses) == 0 {
+		if cfg.BindAddress != "" {
+			addresses = []string{cfg.BindAddress}
+		} else {
+			addresses = []string{"127.0.0.1:53"}
+		}
 	}
 
 	result := HealthResult{
@@ -64,25 +68,85 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 		result.RawScore += w.Process
 	}
 
-	result.TCPAlive = CheckTCP(address, timeout)
+	allTCP := true
+	for _, addr := range addresses {
+		if !CheckTCP(addr, timeout) {
+			allTCP = false
+			break
+		}
+	}
+	result.TCPAlive = allTCP
 	if result.TCPAlive {
 		result.RawScore += w.TCP
 	}
 
-	result.UDPAlive = CheckUDP(address, cfg.DNSDomain, timeout)
+	udpDomain := cfg.DNSDomain
+	if udpDomain == "" && len(cfg.DNSDomains) > 0 {
+		udpDomain = cfg.DNSDomains[0]
+	}
+	allUDP := true
+	for _, addr := range addresses {
+		if !CheckUDP(addr, udpDomain, timeout) {
+			allUDP = false
+			break
+		}
+	}
+	result.UDPAlive = allUDP
 	if result.UDPAlive {
 		result.RawScore += w.UDP
 	}
 
 	if cfg.DNSEnabled {
-		domain := cfg.DNSDomain
-		if domain == "" {
-			domain = "google.com"
+		domains := cfg.DNSDomains
+		if len(domains) == 0 {
+			if cfg.DNSDomain != "" {
+				domains = []string{cfg.DNSDomain}
+			} else {
+				domains = []string{"google.com"}
+			}
 		}
-		result.DNSDetail = CheckDNS(domain, address, timeout)
-		result.DNSAlive = result.DNSDetail.Success
+
+		allSuccess := true
+		anySlow := false
+		var totalRTT time.Duration
+		var queryCount int
+		var lastDetail DNSResult
+
+		for _, addr := range addresses {
+			for _, dom := range domains {
+				res := CheckDNSQuery(dom, cfg.DNSRecordType, addr, timeout)
+				if !res.Success {
+					allSuccess = false
+					lastDetail = res
+					break
+				}
+				totalRTT += res.RTT
+				queryCount++
+				if cfg.DNSLatencyThreshold > 0 && res.RTT > cfg.DNSLatencyThreshold {
+					anySlow = true
+				}
+				lastDetail = res
+			}
+			if !allSuccess {
+				break
+			}
+		}
+
+		if queryCount > 0 {
+			lastDetail.RTT = totalRTT / time.Duration(queryCount)
+		}
+		lastDetail.Success = allSuccess
+		lastDetail.Slow = anySlow
+		result.DNSDetail = lastDetail
+		result.DNSAlive = allSuccess
+
 		if result.DNSAlive {
-			result.RawScore += w.DNS
+			if anySlow {
+				// SLA Penalty: query succeeded but exceeded latency threshold, award 50% DNS weight
+				result.RawScore += w.DNS / 2
+			} else {
+				result.RawScore += w.DNS
+			}
 		}
 	}
 
@@ -97,13 +161,17 @@ func RunChecks(cfg ProcessConfig) HealthResult {
 }
 
 type ProcessConfig struct {
-	ProcessNames  []string
-	ProcessWeight int
-	TCPWeight     int
-	UDPWeight     int
-	DNSWeight     int
-	DNSEnabled    bool
-	DNSDomain     string
-	BindAddress   string
-	Timeout       time.Duration
+	ProcessNames        []string
+	ProcessWeight       int
+	TCPWeight           int
+	UDPWeight           int
+	DNSWeight           int
+	DNSEnabled          bool
+	DNSDomain           string
+	DNSDomains          []string
+	DNSRecordType       string
+	DNSLatencyThreshold time.Duration
+	BindAddress         string
+	BindAddresses       []string
+	Timeout             time.Duration
 }

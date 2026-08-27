@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -28,11 +30,17 @@ type Runner struct {
 	lastIfaceDown bool
 	wasMaster     bool
 
+	// Notification debounce: state-change emails only fire after the new state
+	// has held for notify.confirm consecutive cycles. Failover itself is never
+	// delayed by this — the CARP decision runs before the email is considered.
+	confirmState State
+	confirmCount int
+
 	preemptCooldown    time.Time
 	kernelPreemptSince time.Time // when we started waiting for a peer's kernel preempt
+	recoveryStreak     int       // consecutive fully-healthy checks while holding the VIP down
 
-	lastPeerOK    map[string]bool
-	peerDownCount map[string]int
+	peers *peerTracker
 
 	peerSrv  *peer.HeartbeatServer
 	notifier *notify.EventDispatcher
@@ -160,18 +168,29 @@ func (r *Runner) Reload(newCfg *config.Config) {
 func (r *Runner) Run() error {
 	cfg := r.cfgValue()
 	if cfg.Peer.Enabled {
+		srv := &httpServer{
+			addr:    cfg.Peer.ListenAddr(),
+			handler: r.peerSrv.Handler(),
+			log:     r.log,
+			tls:     cfg.Peer.TLS,
+		}
 		r.wg.Add(1)
 		go func() {
 			defer r.wg.Done()
-			srv := &httpServer{
-				addr:    cfg.Peer.ListenAddr(),
-				handler: r.peerSrv.Handler(),
-				log:     r.log,
-				tls:     cfg.Peer.TLS,
-			}
 			r.log.Info("[PEER] starting peer heartbeat server", "bind", cfg.Peer.Bind, "tls", cfg.Peer.TLS.Enabled)
-			if err := srv.ListenAndServe(); err != nil {
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				r.log.Error("[PEER] heartbeat server error", "error", err)
+			}
+		}()
+
+		r.wg.Add(1)
+		go func() {
+			defer r.wg.Done()
+			<-r.done
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				r.log.Warn("[PEER] heartbeat server shutdown error", "error", err)
 			}
 		}()
 	}
@@ -240,11 +259,15 @@ func (r *Runner) runOnce() {
 	cfg := r.cfgValue()
 
 	healthCfg := health.ProcessConfig{
-		ProcessNames: cfg.Health.ProcessList(),
-		DNSEnabled:   cfg.Health.DNSQuery.Enabled,
-		DNSDomain:    cfg.Health.DNSQuery.Domain,
-		BindAddress:  cfg.Health.BindAddress,
-		Timeout:      cfg.Health.DNSQuery.Timeout,
+		ProcessNames:        cfg.Health.ProcessList(),
+		DNSEnabled:          cfg.Health.DNSQuery.Enabled,
+		DNSDomain:           cfg.Health.DNSQuery.Domain,
+		DNSDomains:          cfg.Health.DNSQuery.DomainList(),
+		DNSRecordType:       cfg.Health.DNSQuery.Type(),
+		DNSLatencyThreshold: cfg.Health.DNSQuery.LatencyThreshold,
+		BindAddress:         cfg.Health.BindAddress,
+		BindAddresses:       cfg.Health.BindAddressList(),
+		Timeout:             cfg.Health.DNSQuery.Timeout,
 	}
 	// Weights: configured value, else default, else 0 when check disabled.
 	w := cfg.Health.Weights
@@ -283,12 +306,55 @@ func (r *Runner) runOnce() {
 		for _, p := range cfg.Peer.Peers {
 			entries = append(entries, peer.PeerEntry{IP: p.IP, Name: p.Name, Token: cfg.Peer.TokenFor(p)})
 		}
-		peerPort := cfg.Peer.PortNum()
-		peerHealths = peer.CheckAllPeers(entries, peerPort, 3*time.Second, cfg.Peer.Ping, cfg.Peer.TLS.Enabled)
+		peerHealths = peer.CheckAllPeers(entries, peer.CheckOptions{
+			Port:      cfg.Peer.PortNum(),
+			Timeout:   3 * time.Second,
+			Ping:      cfg.Peer.Ping,
+			TLS:       cfg.Peer.TLS.Enabled,
+			DNSPort:   cfg.Peer.DNSPort,
+			DNSDomain: cfg.Health.DNSQuery.Domain,
+		})
 	}
 
 	policyMode := ParsePolicyMode(cfg.Policy.Mode)
 	decision := EvaluatePolicy(policyMode, healthResult.Score, carpState, peerHealths, demotionLevels(cfg))
+
+	// Hold back a recovering node until it proves it is fully healthy, so the
+	// VIP is not handed to a node whose DNS has only partially come back.
+	recoveryConfirm := cfg.Agent.RecoveryConfirm
+	if recoveryConfirm == 0 {
+		recoveryConfirm = DefaultRecoveryConfirm
+	}
+	var recoveryHeld bool
+	decision, r.recoveryStreak, recoveryHeld = applyRecoveryHold(
+		policyMode, decision, r.lastIfaceDown,
+		healthResult.RawScore, healthResult.MaxScore,
+		recoveryConfirm, r.recoveryStreak, demotionLevels(cfg),
+	)
+	if recoveryHeld {
+		// The node is not serving: report it as UNHEALTHY so the recovery
+		// email arrives when the VIP is actually reclaimed, not while waiting.
+		currentState = StateUnhealthy
+		stateChanged = currentState.Transitioned(r.lastState)
+	}
+
+	// Notification debounce bookkeeping. Count consecutive cycles spent in the
+	// current state; any change resets the streak. A state-change email fires
+	// only after the new state has held for cfg.Notify.Confirm cycles, so a
+	// transient dip (e.g. a score of 25 while the process restarts) is never
+	// reported. Failover is NOT affected — the CARP decision above is what
+	// moves the VIP, and it has already been computed by this point.
+	if currentState == r.confirmState {
+		r.confirmCount++
+	} else {
+		r.confirmState = currentState
+		r.confirmCount = 1
+	}
+	notifyConfirm := cfg.Notify.Confirm
+	if notifyConfirm == 0 {
+		notifyConfirm = DefaultNotifyConfirm
+	}
+	notifyReady := r.confirmCount >= notifyConfirm
 
 	vipIface := r.cfg.Agent.VIPInterface
 
@@ -446,25 +512,27 @@ func (r *Runner) runOnce() {
 	}
 	notificationCarp = carpState
 
-	// Step 4: Predict final CARP state for notification
-	// When HEALTHY with interface UP and currently BACKUP, but our effective
-	// advskew is lower than ALL healthy peers, we WILL become MASTER
-	// (either immediately via CARP timeout, or after peer steps down via preempt).
-	if currentState == StateHealthy && notificationCarp == carp.StateBackup {
+	// Step 4: Predict final CARP state for notification (preempt mode only).
+	// When HEALTHY with interface UP and currently BACKUP, we WILL become
+	// MASTER only if our effective advskew is strictly lower than every
+	// healthy peer's. A peer with equal or lower effective keeps the role:
+	// the agent steps down only when a peer has strictly lower effective
+	// (see step 2), and with equal values the kernel keeps the current master.
+	// Sticky mode never preempts, so it is skipped — predicting MASTER there
+	// would report a state the agent never drives (e.g. a healthy sticky MASTER
+	// peer with a lower-priority advskew stays MASTER).
+	if policyMode == PolicyPreempt && currentState == StateHealthy && notificationCarp == carp.StateBackup {
 		localAdvskew, err := carp.GetAdvskew(r.cfg.Agent.VIPInterface, r.cfg.Agent.VHID)
 		if err == nil {
 			myEffective := localAdvskew + actualDemotion
-			peerHasHigherPriority := false
+			willBeMaster := true
 			for _, ph := range peerHealths {
-				if ph.OK && ph.Score >= 80 {
-					peerEffective := ph.Advskew + ph.Demotion
-					if peerEffective < myEffective {
-						peerHasHigherPriority = true
-						break
-					}
+				if ph.OK && ph.Score >= 80 && (ph.Advskew+ph.Demotion) <= myEffective {
+					willBeMaster = false
+					break
 				}
 			}
-			if !peerHasHigherPriority {
+			if willBeMaster {
 				notificationCarp = carp.StateMaster
 			}
 		}
@@ -499,66 +567,130 @@ func (r *Runner) runOnce() {
 		} else {
 			r.log.Warn("[PEER] peer unreachable",
 				"peer", ph.Name,
+				"ping", ph.PingOK,
+				"ping_detail", ph.PingDetail,
+				"http", ph.AgentProbe.String(),
+				"tcp53", ph.TCP53.String(),
+				"udp53", udpProbeString(ph.UDP53OK),
+				"severity", ph.Severity.String(),
+				"diagnosis", ph.Diagnosis,
 				"error", ph.Error,
 			)
 		}
 	}
 
 	if r.cfg.Peer.Enabled {
-		if r.lastPeerOK == nil {
-			r.lastPeerOK = make(map[string]bool)
-			r.peerDownCount = make(map[string]int)
+		if r.peers == nil {
+			r.peers = newPeerTracker(peerDownThreshold)
 		}
 
 		nodeIP, _ := carp.GetNodeIP(r.cfg.Agent.Interface)
 
 		for _, ph := range peerHealths {
-			wasOK, seen := r.lastPeerOK[ph.IP]
-			r.lastPeerOK[ph.IP] = ph.OK
+			// Carp is remembered whenever the heartbeat answered (even for an
+			// unhealthy but responding peer), so an outage email can always say
+			// what role the peer held before it stopped answering.
+			if ph.Carp != "" {
+				r.peers.rememberCarp(ph.IP, ph.Carp)
+			}
 
-			if !ph.OK {
-				r.peerDownCount[ph.IP]++
-				if seen && wasOK && r.peerDownCount[ph.IP] >= peerDownThreshold {
-					r.log.Warn("[PEER] peer declared DOWN",
-						"peer", ph.Name,
-						"ip", ph.IP,
-						"consecutive_failures", r.peerDownCount[ph.IP],
-					)
-					r.notifier.DispatchPeer(
-						"DOWN (unreachable)",
-						ph.Name,
-						ph.IP,
-						ph.Error,
-						healthResult.Score,
-						currentState.String(),
-						notificationCarp.String(),
-						nodeIP,
-					)
-					r.peerDownCount[ph.IP] = 0
-				}
-			} else {
-				r.peerDownCount[ph.IP] = 0
-				if seen && !wasOK {
-					r.log.Info("[PEER] peer recovered",
-						"peer", ph.Name,
-						"ip", ph.IP,
-					)
-					r.notifier.DispatchPeer(
-						"UP (recovered)",
-						ph.Name,
-						ph.IP,
-						"",
-						healthResult.Score,
-						currentState.String(),
-						notificationCarp.String(),
-						nodeIP,
-					)
-				}
+			wentDown, cameUp := r.peers.Update(ph.IP, ph.OK)
+
+			// Classify why the heartbeat failed. "DOWN (unreachable)" becomes
+			// the old one-size-fits-all status; the probe result decides
+			// between host-down, agent-only, and critical DNS outage.
+			status := ph.Severity.String()
+			if ph.Severity == peer.SeverityNone {
+				status = "DOWN (unreachable)"
+			}
+
+			info := notify.PeerProbeInfo{
+				Diagnosis:  ph.Diagnosis,
+				LastCarp:   r.peers.LastCarp(ph.IP),
+				Ping:       pingProbeString(ph.PingOK, ph.PingDetail),
+				AgentProbe: ph.AgentProbe.String(),
+				TCP53:      ph.TCP53.String(),
+				UDP53:      udpProbeString(ph.UDP53OK),
+			}
+
+			switch {
+			case wentDown:
+				r.log.Warn("[PEER] peer declared DOWN",
+					"peer", ph.Name,
+					"ip", ph.IP,
+					"consecutive_failures", peerDownThreshold,
+					"status", status,
+					"diagnosis", ph.Diagnosis,
+				)
+				r.peers.SetStatus(ph.IP, status)
+				r.notifier.DispatchPeer(
+					status,
+					ph.Name,
+					ph.IP,
+					ph.Error,
+					healthResult.Score,
+					currentState.String(),
+					notificationCarp.String(),
+					nodeIP,
+					info,
+				)
+			case cameUp:
+				r.peers.SetStatus(ph.IP, "")
+				r.log.Info("[PEER] peer recovered",
+					"peer", ph.Name,
+					"ip", ph.IP,
+				)
+				r.notifier.DispatchPeer(
+					"UP (recovered)",
+					ph.Name,
+					ph.IP,
+					"",
+					healthResult.Score,
+					currentState.String(),
+					notificationCarp.String(),
+					nodeIP,
+					notify.PeerProbeInfo{},
+				)
+			case !ph.OK && r.peers.Status(ph.IP) != "" && status != r.peers.Status(ph.IP):
+				// The peer was already declared DOWN and its classification
+				// CHANGED — e.g. a shutting-down VM moves from "connection
+				// refused" to "no reply at all". Each status has its own
+				// cooldown key, so the change fires immediately instead of
+				// leaving the operator with a stale "host up" email. A peer
+				// down since startup has no recorded status and stays quiet.
+				r.peers.SetStatus(ph.IP, status)
+				r.notifier.DispatchPeer(
+					status,
+					ph.Name,
+					ph.IP,
+					ph.Error,
+					healthResult.Score,
+					currentState.String(),
+					notificationCarp.String(),
+					nodeIP,
+					info,
+				)
+			case !ph.OK && ph.Severity == peer.SeverityCritical:
+				// A VIP held by a node that no longer answers DNS needs a human.
+				// The tracker fires the initial alert once, so re-fire here every
+				// cooldown period until the peer is reachable again — the shared
+				// "peer:IP:<status>" key is what rate-limits it.
+				r.notifier.DispatchPeer(
+					status,
+					ph.Name,
+					ph.IP,
+					ph.Error,
+					healthResult.Score,
+					currentState.String(),
+					notificationCarp.String(),
+					nodeIP,
+					info,
+				)
 			}
 		}
 	}
 
-	if stateChanged {
+	if stateChanged && notifyReady {
 		nodeIP, _ := carp.GetNodeIP(cfg.Agent.Interface)
 		vip, _ := carp.GetVIP(cfg.Agent.VIPInterface, cfg.Agent.VHID)
 		r.notifier.Dispatch(
@@ -616,11 +748,35 @@ func (r *Runner) runOnce() {
 	}
 }
 
+// udpProbeString renders the UDP :53 result for the notification detail block.
+func udpProbeString(ok bool) string {
+	if ok {
+		return "✓ answering DNS queries"
+	}
+	return "✗ not answering DNS queries"
+}
+
+// pingProbeString renders the ICMP probe result with its RTT or error detail.
+func pingProbeString(ok bool, detail string) string {
+	if ok {
+		if detail != "" {
+			return "✓ reply, " + detail
+		}
+		return "✓ replying"
+	}
+	if detail != "" {
+		return "✗ no reply — " + detail
+	}
+	return "✗ no reply"
+}
+
 type httpServer struct {
 	addr    string
 	handler http.Handler
 	log     *slog.Logger
 	tls     config.TLSServerConfig
+	server  *http.Server
+	mu      sync.Mutex
 }
 
 func (s *httpServer) ListenAndServe() error {
@@ -628,8 +784,23 @@ func (s *httpServer) ListenAndServe() error {
 		Addr:    s.addr,
 		Handler: s.handler,
 	}
+	s.mu.Lock()
+	s.server = srv
+	s.mu.Unlock()
+
 	if s.tls.Enabled {
 		return srv.ListenAndServeTLS(s.tls.CertFile, s.tls.KeyFile)
 	}
 	return srv.ListenAndServe()
+}
+
+func (s *httpServer) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	srv := s.server
+	s.mu.Unlock()
+
+	if srv == nil {
+		return nil
+	}
+	return srv.Shutdown(ctx)
 }

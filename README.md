@@ -25,6 +25,9 @@ CARP VIP interface DOWN, triggering immediate takeover by a healthy peer.
 
 - Dual-interface (mgmt always UP + VIP/CARP controlled by agent) & dual-stack (IPv4+IPv6)
 - Multi-DNS: `process_names` for dnsdist, BIND9, or both; configurable check weights
+- **SLA-Aware Health Checks:** dynamic record types (A, AAAA, SOA, etc.), multi-domain queries, dual-stack IPv4/IPv6 `bind_addresses`, and latency SLA threshold penalty
+- **OpenMetrics / Prometheus & Telegraf:** built-in `/metrics` exporter compatible with Prometheus, Telegraf (InfluxDB v1/v2), VictoriaMetrics, and ready-to-import Grafana dashboard templates ([`dashboards/`](dashboards/))
+- **CLI Diagnostics:** built-in `check` report, `status` dashboard, and `version` subcommands
 - Primary failover via `ifconfig down` (<1s), agent-level preempt, effective advskew comparison
 - Kernel-preempt aware: honors `net.inet.carp.preempt=1` on a peer instead of double-acting
 - Peer: shared-secret, pairwise token, TLS, ping classification
@@ -35,16 +38,17 @@ CARP VIP interface DOWN, triggering immediate takeover by a healthy peer.
 ## Quick Start
 
 ```bash
-# Build (scripts/install.sh also auto-builds and detects the platform)
-GOOS=freebsd GOARCH=amd64 go build -o build/dns-ha-agent-freebsd-amd64 ./cmd/dns-ha-agent
+# Build & install via Makefile
+make
+make install
 
-# Install
-sh scripts/install.sh
+# Enable and start the service
 sysrc dns_ha_agent_enable=YES
 service dns-ha-agent start
 
-# Uninstall (PURGE=1 also deletes config, log, state)
-sh scripts/uninstall.sh
+# Run CLI health check & status
+dns-ha-agent check
+dns-ha-agent status
 ```
 
 ## Prerequisites
@@ -82,6 +86,7 @@ internal/
   util/                  exec, ping helpers
 configs/config.yaml      example config
 docs/                    architecture, config, usage
-scripts/                 install.sh, uninstall.sh, rc.d script
+scripts/                 rc.d service script
+Makefile                 FreeBSD build & install
 build/                   compiled binaries (gitignored)
 ```

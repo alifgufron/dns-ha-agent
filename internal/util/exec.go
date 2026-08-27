@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -39,9 +41,12 @@ func Exec(name string, args ...string) ExecResult {
 	return ExecTimeout(10*time.Second, name, args...)
 }
 
-// PingHost returns true if ICMP echo reply received (host reachable).
+// PingHost returns whether an ICMP echo reply was received plus a short detail
+// string: the round-trip time on success, or the ping error otherwise. The
+// detail gives an operator the "why" behind a bare true/false — a timeout, an
+// RTO, or a slow reply all look identical otherwise.
 // IPv4 → ping, IPv6 → ping6 (FreeBSD).
-func PingHost(ip string, timeout time.Duration) bool {
+func PingHost(ip string, timeout time.Duration) (bool, string) {
 	pinger := "ping"
 	args := []string{"-t", "1", "-c", "1", ip}
 	if isIPv6(ip) {
@@ -49,7 +54,26 @@ func PingHost(ip string, timeout time.Duration) bool {
 		args = []string{"-c", "1", ip}
 	}
 	result := ExecTimeout(timeout, pinger, args...)
-	return result.Err == nil
+	if result.Err != nil {
+		detail := strings.TrimSpace(result.Stderr)
+		if detail == "" {
+			detail = result.Err.Error()
+		}
+		return false, detail
+	}
+	return true, pingRTT(result.Stdout)
+}
+
+// pingTimeRe matches the per-reply round-trip line, e.g. "time=0.458 ms".
+var pingTimeRe = regexp.MustCompile(`time=([0-9.]+) ms`)
+
+// pingRTT extracts the round-trip time from ping's output.
+func pingRTT(out string) string {
+	m := pingTimeRe.FindStringSubmatch(out)
+	if m == nil {
+		return ""
+	}
+	return m[1] + " ms"
 }
 
 func isIPv6(ip string) bool {

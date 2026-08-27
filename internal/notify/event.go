@@ -50,7 +50,7 @@ func (d *EventDispatcher) Dispatch(newState, oldState string, score, demotion in
 	}
 }
 
-func (d *EventDispatcher) DispatchPeer(status, peerName, peerIP, errorMsg string, localScore int, localState, localCarp, nodeIP string) {
+func (d *EventDispatcher) DispatchPeer(status, peerName, peerIP, errorMsg string, localScore int, localState, localCarp, nodeIP string, info PeerProbeInfo) {
 	key := "peer:" + peerIP + ":" + status
 
 	if !d.cooldown.Allow(key) {
@@ -61,7 +61,7 @@ func (d *EventDispatcher) DispatchPeer(status, peerName, peerIP, errorMsg string
 		return
 	}
 
-	subject, body := RenderPeerNotification(status, peerName, peerIP, errorMsg, localScore, localState, localCarp, nodeIP)
+	subject, body := RenderPeerNotification(status, peerName, peerIP, errorMsg, localScore, localState, localCarp, nodeIP, info)
 
 	for _, n := range d.notifiers {
 		if err := n.Send(subject, body); err != nil {

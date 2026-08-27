@@ -2,27 +2,41 @@ package health
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/miekg/dns"
 )
 
 type DNSResult struct {
-	Success bool
-	RTT     time.Duration
-	Error   string
+	Success bool          `json:"success"`
+	RTT     time.Duration `json:"rtt"`
+	Error   string        `json:"error,omitempty"`
+	Slow    bool          `json:"slow,omitempty"` // true if query succeeded but RTT exceeded LatencyThreshold
 }
 
 func CheckDNS(domain, resolver string, timeout time.Duration) DNSResult {
+	return CheckDNSQuery(domain, "A", resolver, timeout)
+}
+
+func CheckDNSQuery(domain, recordType, resolver string, timeout time.Duration) DNSResult {
 	if resolver == "" {
 		resolver = "127.0.0.1:53"
 	}
 	if domain == "" {
 		domain = "google.com"
 	}
+	if recordType == "" {
+		recordType = "A"
+	}
+
+	qtype, ok := dns.StringToType[strings.ToUpper(recordType)]
+	if !ok {
+		qtype = dns.TypeA
+	}
 
 	m := new(dns.Msg)
-	m.SetQuestion(dns.Fqdn(domain), dns.TypeA)
+	m.SetQuestion(dns.Fqdn(domain), qtype)
 
 	c := new(dns.Client)
 	c.Timeout = timeout

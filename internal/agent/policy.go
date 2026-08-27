@@ -87,6 +87,56 @@ func EvaluatePolicy(mode PolicyMode, score int, carpState carp.State, peerHealth
 	}
 }
 
+// DefaultRecoveryConfirm is used when agent.recovery_confirm is unset.
+const DefaultRecoveryConfirm = 3
+
+// DefaultNotifyConfirm is used when notify.confirm is unset. 3 cycles at the
+// default 5s interval means a state-change email only goes out after ~10s of a
+// stable state, which filters transient dips without noticeable delay.
+const DefaultNotifyConfirm = 3
+
+// applyRecoveryHold delays reclaiming the VIP until a node that had its VIP
+// interface down has been FULLY healthy (every enabled check passing, i.e.
+// raw == max) for `confirm` consecutive intervals. It returns the decision to
+// act on, the updated streak, and whether the node is still being held back.
+//
+// Without this, a single passing check is enough to bring the interface up, and
+// a kernel with net.inet.carp.preempt=1 (or plain CARP priority) hands the VIP
+// straight back to a node whose DNS is only half up — observed as a node
+// retaking MASTER at score 25 and then flapping DEGRADED/HEALTHY.
+//
+// While held, the node keeps the full unhealthy posture: interface down AND
+// demotion at the unhealthy level. Holding the demotion matters as much as the
+// interface — peers decide whether to step down by comparing effective advskew
+// (advskew + demotion), so a held node that advertised demotion 0 would make a
+// healthy MASTER stand down for a node that is not ready to serve, leaving the
+// VIP briefly owned by nobody.
+//
+// Only preempt mode is gated. Sticky never reclaims, so holding its interface
+// down would just delay it rejoining as BACKUP for no benefit.
+func applyRecoveryHold(mode PolicyMode, decision PolicyDecision, ifaceWasDown bool, rawScore, maxScore, confirm, streak int, demotion DemotionLevels) (PolicyDecision, int, bool) {
+	reclaiming := ifaceWasDown && !decision.DesiredIfaceDown
+	if confirm <= 0 || mode != PolicyPreempt || !reclaiming {
+		return decision, 0, false
+	}
+
+	if maxScore > 0 && rawScore >= maxScore {
+		streak++
+		if streak >= confirm {
+			return decision, streak, false
+		}
+	} else {
+		streak = 0
+	}
+
+	return PolicyDecision{
+		DesiredDemotion:  demotion.Unhealthy,
+		DesiredIfaceDown: true,
+		Action: fmt.Sprintf("recovery-hold — %d/%d stable checks (score %d/%d), demotion %d, vip_iface down",
+			streak, confirm, rawScore, maxScore, demotion.Unhealthy),
+	}, streak, true
+}
+
 func ParsePolicyMode(mode string) PolicyMode {
 	switch mode {
 	case "preempt":

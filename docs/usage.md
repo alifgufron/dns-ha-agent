@@ -9,17 +9,12 @@
 | Third-party Go modules | none | Standard library only; no network access needed to build |
 | Build host OS | any | Linux/macOS can cross-compile a FreeBSD binary |
 
-Install the toolchain:
+Install the toolchain on FreeBSD:
 
 ```bash
 pkg install go          # FreeBSD
-apt install golang-go   # Debian/Ubuntu (or grab a tarball from https://go.dev/dl/)
-dnf install golang      # RHEL/Rocky
 go version              # verify it meets the version in go.mod
 ```
-
-`scripts/install.sh` checks both that `go` exists and that it is new enough,
-and aborts with an explicit message if not.
 
 ### Runtime requirements (target node)
 
@@ -28,7 +23,18 @@ and aborts with an explicit message if not.
 - Two interfaces: management (always up) + VIP/CARP (driven by the agent)
 - No runtime library dependencies — the binary is static
 
-## Build
+## Build & Makefile
+
+Using standard `make`:
+
+```bash
+make            # builds build/dns-ha-agent
+make test       # runs unit test suite
+make install    # installs binary, rc.d script, and sample config (requires root)
+make clean      # cleans build/ artifacts
+```
+
+Or using `go build` directly:
 
 ```bash
 # FreeBSD amd64
@@ -47,12 +53,58 @@ go test ./...
 `scripts/install.sh` also auto-builds and detects the platform (`GOOS`/`GOARCH`
 from `uname`, overridable via env).
 
-## Install
+## CLI Diagnostics & Tools
 
-### Quick (script)
+The agent provides built-in interactive CLI tools for terminal diagnostics:
+
+### 1. Health Check Report (`check`)
+Runs a single comprehensive check cycle and renders an immediate summary report:
 
 ```bash
-sh scripts/install.sh          # build + install binary, config, rc.d
+dns-ha-agent check
+dns-ha-agent check -config /usr/local/etc/dns-ha-agent.yaml
+```
+
+Output:
+```text
+┌────────────────────────────────────────────────────────┐
+│  DNS Health Check Report (14ms)                        │
+├──────────────────────────┬────────┬────────────────────┤
+│ Check                    │ Status │ Detail / Weight    │
+├──────────────────────────┼────────┼────────────────────┤
+│ Process (dnsdist)        │ OK     │ weight: 25         │
+│ TCP :53                  │ OK     │ weight: 25         │
+│ UDP :53                  │ OK     │ weight: 25         │
+│ DNS Query (A)            │ OK     │ RTT: 12ms (wt: 25) │
+├──────────────────────────┴────────┴────────────────────┤
+│ Score: 100 / 100  (Raw: 100/100)   State: HEALTHY      │
+└────────────────────────────────────────────────────────┘
+```
+
+### 2. Node & Peer Status Dashboard (`status`)
+Inspects local CARP status and probes all configured cluster peers:
+
+```bash
+dns-ha-agent status
+```
+
+### 3. Version Info (`version`)
+```bash
+dns-ha-agent version
+```
+
+## Install
+
+### Quick (Makefile)
+
+```bash
+make install          # build + install binary, config, rc.d (run as root / doas / sudo)
+```
+
+To remove:
+```bash
+make uninstall        # removes binary and rc.d script (preserves config)
+make purge            # removes binary, rc.d script, config, log, and state
 ```
 
 ### Install without a Go toolchain
@@ -61,17 +113,17 @@ The target node does not need Go — build elsewhere and copy the binary over:
 
 ```bash
 # On the build host
-BUILD_ONLY=1 GOOS=freebsd GOARCH=amd64 sh scripts/install.sh
-scp build/dns-ha-agent-freebsd-amd64 root@node1:/tmp/
+GOOS=freebsd GOARCH=amd64 make
+scp build/dns-ha-agent root@node1:/tmp/
 
 # On the FreeBSD node (see "Manual" below for config + rc.d)
-install -m 0555 /tmp/dns-ha-agent-freebsd-amd64 /usr/local/bin/dns-ha-agent
+install -m 0555 /tmp/dns-ha-agent /usr/local/bin/dns-ha-agent
 ```
 
 ### Manual
 
 ```bash
-cp build/dns-ha-agent-freebsd-amd64 /usr/local/bin/dns-ha-agent && chmod 0555 /usr/local/bin/dns-ha-agent
+cp build/dns-ha-agent /usr/local/bin/dns-ha-agent && chmod 0555 /usr/local/bin/dns-ha-agent
 cp configs/config.yaml /usr/local/etc/dns-ha-agent.yaml && chmod 0640 /usr/local/etc/dns-ha-agent.yaml
 cp scripts/rc.d/dns-ha-agent /usr/local/etc/rc.d/ && chmod 0555 /usr/local/etc/rc.d/dns-ha-agent
 ```
@@ -81,8 +133,8 @@ cp scripts/rc.d/dns-ha-agent /usr/local/etc/rc.d/ && chmod 0555 /usr/local/etc/r
 ```bash
 mkdir -p /etc/rc.conf.d
 cat > /etc/rc.conf.d/dns-ha-agent << 'EOF'
-export HA_TOKEN="RahasiaSuperAman123"
-export SMTP_PASS="smtpsecret"
+export HA_TOKEN="SuperSecretClusterToken123"
+export SMTP_PASS="smtpsecretpassword"
 EOF
 chmod 0600 /etc/rc.conf.d/dns-ha-agent
 ```
@@ -128,6 +180,40 @@ and **defers to the kernel** instead of stepping down at the same time, falling
 back after a 15s grace period if the kernel does not reclaim. No config change
 needed. See architecture.md → "Kernel preempt interop".
 
+### Firewall (PF) — Securing Peer Heartbeat Port
+
+To restrict access to the HTTP heartbeat port (e.g. TCP `:8845`) strictly to cluster peers and protect against unauthorized network scans, configure FreeBSD's Packet Filter (`pf`):
+
+1. Add rules to `/etc/pf.conf`:
+```pf
+# Management interface & HA agent port
+mgmt_if = "vtnet0"
+ha_port = "8845"
+
+# Cluster peers table (management IPs of all nodes)
+table <ha_peers> const { 10.0.0.1, 10.0.0.2, 10.0.0.3 }
+
+# Allow CARP multicast traffic
+pass in on vtnet1 proto carp keep state
+
+# Allow ICMP ping between cluster nodes (used for host liveness diagnosis)
+pass in on $mgmt_if inet proto icmp icmp-type { echoreq } from <ha_peers> to ($mgmt_if) keep state
+
+# Allow DNS-HA-Agent HTTP heartbeat ONLY from cluster peers
+pass in quick on $mgmt_if proto tcp from <ha_peers> to ($mgmt_if) port $ha_port flags S/SA keep state
+
+# Block all unauthorized access to the HA agent port
+block in quick on $mgmt_if proto tcp to ($mgmt_if) port $ha_port
+```
+
+2. Enable and start PF:
+```bash
+sysrc pf_enable=YES
+sysrc pf_rules="/etc/pf.conf"
+service pf start
+service pf reload    # if pf was already running
+```
+
 ### Log rotation (newsyslog)
 
 ```bash
@@ -144,12 +230,133 @@ EOF
 tail -f /var/log/dns-ha-agent.log
 sysctl net.inet.carp.demotion        # 0=HEALTHY 50=DEGRADED 255=UNHEALTHY
 ifconfig vtnet1 | grep carp          # carp: MASTER / BACKUP
-curl -H "X-HA-DDIST-TOKEN: secret" http://10.0.0.11:8845/health
+curl -H "X-DNS-HA-TOKEN: secret" http://10.0.0.11:8845/health
 ```
 
 Reload without restart: `service dns-ha-agent reload` (SIGHUP). Changes to
 health/weights/policy/notify apply immediately; peer `bind/port/token/tls` require
 a restart.
+
+---
+
+## Metrics & Monitoring (Prometheus, Telegraf, InfluxDB, Grafana)
+
+`dns-ha-agent` exposes a standard OpenMetrics / Prometheus text endpoint at **`/metrics`** on the peer HTTP server port (e.g. `:8845`).
+
+Because `/metrics` strictly adheres to the standard **OpenMetrics / Prometheus exposition format**, it is fully compatible with **any metric scraper or collector** that supports Prometheus scraping, including:
+- **Prometheus Server**
+- **Telegraf** (with direct output to **InfluxDB v1.x**, **InfluxDB v2.x / v3 / InfluxDB Cloud**)
+- **VictoriaMetrics** (`vmagent`)
+- **Grafana Agent / Grafana Alloy**
+- **OpenTelemetry Collector** (`prometheus` receiver)
+- **Datadog Agent** (Prometheus check)
+- **Vector** (`prometheus_scrape` source)
+
+---
+
+### 1. Scraper Option A: Prometheus Server
+
+Configure your remote `prometheus.yml` to scrape each node:
+
+> **Authentication Note:** The `bearer_token` must match the cluster shared secret (`peer.token` in `config.yaml`, or `${HA_TOKEN}` environment variable).
+
+```yaml
+scrape_configs:
+  - job_name: 'dns-ha-cluster'
+    scrape_interval: 5s
+    scrape_timeout: 3s
+    metrics_path: '/metrics'
+    # Must match peer.token / HA_TOKEN secret on the agent nodes:
+    bearer_token: 'SuperSecretClusterToken123'
+    static_configs:
+      - targets:
+          - '10.0.0.1:8845'   # Node A Mgmt IP
+          - '10.0.0.2:8845'   # Node B Mgmt IP
+        labels:
+          cluster: 'dns-production'
+```
+
+---
+
+### 2. Scraper Option B: Telegraf (Exporting to InfluxDB v1 & v2/v3)
+
+Telegraf can scrape the `/metrics` endpoint using the `inputs.prometheus` plugin and send metrics directly to **InfluxDB v1.x** or **InfluxDB v2.x / v3 / Cloud**.
+
+Add the following configuration to `/etc/telegraf/telegraf.conf`:
+
+```toml
+# ==============================================================================
+# INPUT PLUGIN: Scrape dns-ha-agent Prometheus endpoint
+# ==============================================================================
+[[inputs.prometheus]]
+  ## List of dns-ha-agent metrics endpoints to scrape
+  urls = [
+    "http://10.0.0.1:8845/metrics",
+    "http://10.0.0.2:8845/metrics"
+  ]
+
+  ## Scrape interval & timeout
+  interval = "5s"
+  timeout = "3s"
+
+  ## Bearer token authorization (must match peer.token / HA_TOKEN)
+  bearer_token_string = "SuperSecretClusterToken123"
+
+  ## Metric structure version (version 2 recommended for InfluxDB)
+  metric_version = 2
+
+  ## Optional static tags for identification
+  [inputs.prometheus.tags]
+    cluster = "dns-production"
+
+# ==============================================================================
+# OUTPUT PLUGIN OPTION 1: InfluxDB v1.x
+# ==============================================================================
+[[outputs.influxdb]]
+  urls = ["http://influxdb.example.com:8086"]
+  database = "telemetry"
+  skip_database_creation = false
+  # username = "telegraf"
+  # password = "secretpassword"
+
+# ==============================================================================
+# OUTPUT PLUGIN OPTION 2: InfluxDB v2.x / v3 / Cloud
+# ==============================================================================
+[[outputs.influxdb_v2]]
+  urls = ["http://influxdb2.example.com:8086"]
+  token = "YOUR_INFLUXDB_V2_API_TOKEN"
+  organization = "my-org"
+  bucket = "dns-ha-metrics"
+```
+
+---
+
+### 3. Exported Prometheus Metrics
+
+| Metric | Type | Description |
+|---|---|---|
+| `dns_ha_health_score` | Gauge | Current node health score (`0-100`) |
+| `dns_ha_carp_role{role="MASTER\|BACKUP"}` | Gauge | CARP status (`1` if active in role, `0` if inactive) |
+| `dns_ha_advskew` | Gauge | CARP advskew configured on VIP interface |
+| `dns_ha_demotion_factor` | Gauge | Current CARP demotion counter (`0`, `50`, `255`, etc.) |
+| `dns_ha_kernel_preempt` | Gauge | FreeBSD `net.inet.carp.preempt` status (`0` or `1`) |
+| `dns_ha_check_status{check="process\|tcp\|udp\|dns"}` | Gauge | Status of individual check (`1` = OK, `0` = FAIL) |
+| `dns_ha_check_rtt_seconds{check="dns"}` | Gauge | DNS query round-trip latency in seconds |
+
+---
+
+### 4. Grafana Dashboard Setup (v7+ / v8 / v9 / v10 / Latest)
+
+Pre-built, production-ready Grafana dashboard JSON templates are available in the [`dashboards/`](../dashboards/) directory:
+
+- **For Prometheus Data Source:** [`dashboards/grafana-prometheus.json`](../dashboards/grafana-prometheus.json) (uses PromQL queries)
+- **For Telegraf + InfluxDB Data Source:** [`dashboards/grafana-influxdb.json`](../dashboards/grafana-influxdb.json) (uses InfluxQL queries)
+
+**How to Import into Grafana:**
+1. Open Grafana Web Interface (version 7.0+ or latest).
+2. Go to **Dashboards** → **New** → **Import**.
+3. Upload [`dashboards/grafana-prometheus.json`](../dashboards/grafana-prometheus.json) (for Prometheus) or [`dashboards/grafana-influxdb.json`](../dashboards/grafana-influxdb.json) (for Telegraf + InfluxDB).
+4. Select your **Prometheus** or **InfluxDB** Data Source and click **Import**.
 
 ---
 
@@ -238,11 +445,49 @@ health:
 |----------|----------------|------------------|--------|
 | Both healthy | MASTER | BACKUP | **N1 MASTER** |
 | N1 crash | `vtnet1 DOWN` | MASTER | **N2 MASTER** (link down) |
-| N1 recovers | UP → BACKUP | MASTER → step down | **N1 MASTER** (preempt) |
+| N1 recovers | hold → UP → BACKUP | MASTER → step down | **N1 MASTER** (preempt, after recovery confirmation) |
 | N2 crash | MASTER | `vtnet1 DOWN` | **N1 MASTER** |
-| N2 recovers | MASTER | UP → BACKUP | **N1 stays MASTER** |
+| N2 recovers | MASTER | hold → UP → BACKUP | **N1 stays MASTER** |
 | Both crash | `DOWN` | `DOWN` | **No MASTER** |
 | N1 total failure | — | MASTER | **N2 MASTER** (timeout) |
+
+### Recovery confirmation
+
+A node coming back does **not** reclaim the VIP the moment one check passes.
+It keeps its VIP interface down until every enabled check has passed for
+`agent.recovery_confirm` consecutive intervals (default `3`):
+
+```yaml
+agent:
+  recovery_confirm: 5      # 5 × interval — with interval 5s, ~25s of proven health
+```
+
+Why it exists: when `dnsdist` restarts, the process is alive seconds before
+:53 actually answers. Without the wait the agent brought the interface straight
+back up, and a kernel with `net.inet.carp.preempt=1` (or plain CARP priority)
+handed the VIP back at score 25/100 — the node then flapped between DEGRADED and
+HEALTHY while serving as MASTER.
+
+Log line while waiting:
+
+```
+[CHECK HEALTH] ... state=UNHEALTHY decision=recovery-hold — 2/5 stable checks (score 75/100), demotion 255, vip_iface down
+```
+
+Notes:
+
+- **Any** failed check resets the counter — a flapping node never creeps up to
+  the threshold.
+- While held, the node keeps demotion at the unhealthy level (255), not just the
+  interface down. This is deliberate: peers decide to step down by comparing
+  effective advskew (`advskew + demotion`), so a held node advertising demotion 0
+  would make the healthy MASTER stand down for a node not ready to serve —
+  leaving the VIP owned by nobody for a moment.
+- The node reports `UNHEALTHY` while waiting, so the recovery email arrives when
+  the VIP is genuinely reclaimed, not while it is still confirming.
+- Only applies to `policy.mode: preempt`. Sticky never reclaims, so it is not
+  held back. Failover (going down) is never delayed — only coming back is.
+- `recovery_confirm: 0` disables the wait entirely (old behaviour).
 
 ---
 
@@ -269,10 +514,24 @@ notify:
     bot_token: "${TELEGRAM_TOKEN}"
     chat_id: "123456789"     # negative for group/channel
   cooldown: 5m
+  confirm: 3                     # consecutive checks a state must hold before the email fires
   vip_loss_alert: true
 ```
 
 Emails include the predicted CARP state + the last 10 lines of `/var/log/messages` (`carp:`/`arp:`).
+
+### `confirm`
+
+A state-change email only fires after the new state has held for `confirm`
+consecutive checks (default `3` — with a 5s interval that is ~10s). It filters
+transient dips that resolve on their own, e.g. a `dnsdist` restart showing
+`UNHEALTHY` (score 25) for one cycle before coming back, which used to generate
+a false "UNHEALTHY" alert.
+
+**It never delays failover.** The CARP decision (interface up/down + demotion)
+runs on the first check of the new state; only the notification waits for
+confirmation. So `confirm` trades a slightly later email for accuracy, at no
+cost to availability.
 
 ### `cooldown`
 
@@ -296,6 +555,23 @@ during that window still alerts right away. Suppressed alerts are logged:
 
 Lower it for faster re-alerting, raise it on links that flap. The timer lives in
 memory, so a restart clears it.
+
+### Peer alerts
+
+When a peer's heartbeat fails, the agent probes it directly (ICMP ping, TCP 53,
+UDP 53) before alerting, and classifies the failure:
+
+| Status | Meaning |
+|--------|---------|
+| `DOWN (host unreachable)` | No ICMP reply and nothing answered on any port — VM down or network partition |
+| `DEGRADED (agent down, DNS serving)` | Agent/health endpoint down, but DNS still answers queries |
+| `CRITICAL (host up, DNS not serving)` | Host alive (ICMP or a probe answered) but DNS is gone — hung userland, or DNS down/filtered |
+
+The ICMP probe runs on every heartbeat failure — there is no switch to disable
+it. The email and the `[PEER] peer unreachable` log line both carry the
+per-probe detail (`ping`, `http`, `tcp53`, `udp53`) plus the last known CARP
+role the peer held, so a dead VM, a hung agent, and a stopped DNS server each
+get a distinct, accurate message instead of a generic "unreachable".
 
 ### `vip_loss_alert`
 
@@ -373,7 +649,7 @@ the cause is different from a real split-brain. Distinguish them by checking
 whether the peer is simply unreachable:
 
 ```bash
-curl -H "X-HA-DDIST-TOKEN: $HA_TOKEN" http://<peer_mgmt_ip>:8845/health
+curl -H "X-DNS-HA-TOKEN: $HA_TOKEN" http://<peer_mgmt_ip>:8845/health
 ```
 
 You will usually see the `Peer DOWN` alert next to the MASTER-loss one in that
