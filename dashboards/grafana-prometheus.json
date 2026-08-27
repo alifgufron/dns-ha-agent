@@ -1,4 +1,28 @@
 {
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Select Prometheus Data Source for DNS HA Agent",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "7.5.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    }
+  ],
   "annotations": {
     "list": [
       {
@@ -1034,6 +1058,5 @@
   },
   "timezone": "browser",
   "title": "DNS HA Agent — FreeBSD CARP Cluster (Prometheus)",
-  "uid": "dns-ha-agent-prometheus",
-  "version": 3
+  "uid": "dns-ha-agent-prometheus"
 }
