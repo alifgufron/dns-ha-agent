@@ -297,7 +297,7 @@ Add the following configuration to `/etc/telegraf/telegraf.conf`:
 
   ## Scrape interval & timeout
   interval = "5s"
-  response_timeout = "3s"
+  timeout = "3s"
 
   ## Bearer token authorization (must match peer.token / HA_TOKEN)
   bearer_token_string = "SuperSecretClusterToken123"
