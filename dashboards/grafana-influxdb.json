@@ -30,19 +30,18 @@
       "title": "Health Score",
       "type": "stat",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
       },
       "targets": [
         {
           "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
           },
-          "editorMode": "code",
-          "expr": "dns_ha_health_score",
-          "instant": true,
-          "legendFormat": "{{instance}}",
+          "query": "SELECT last(\"dns_ha_health_score\") FROM \"prometheus\" WHERE $timeFilter GROUP BY \"url\"",
+          "alias": "$tag_url",
+          "rawQuery": true,
           "refId": "A"
         }
       ],
@@ -79,19 +78,18 @@
       "title": "CARP Master Role",
       "type": "stat",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
       },
       "targets": [
         {
           "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
           },
-          "editorMode": "code",
-          "expr": "dns_ha_carp_role{role=\"MASTER\"}",
-          "instant": true,
-          "legendFormat": "{{instance}}",
+          "query": "SELECT last(\"dns_ha_carp_role\") FROM \"prometheus\" WHERE (\"role\" = 'MASTER') AND $timeFilter GROUP BY \"url\"",
+          "alias": "$tag_url",
+          "rawQuery": true,
           "refId": "A"
         }
       ],
@@ -132,19 +130,18 @@
       "title": "CARP Demotion",
       "type": "stat",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
       },
       "targets": [
         {
           "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
           },
-          "editorMode": "code",
-          "expr": "dns_ha_demotion_factor",
-          "instant": true,
-          "legendFormat": "{{instance}}",
+          "query": "SELECT last(\"dns_ha_demotion_factor\") FROM \"prometheus\" WHERE $timeFilter GROUP BY \"url\"",
+          "alias": "$tag_url",
+          "rawQuery": true,
           "refId": "A"
         }
       ],
@@ -177,19 +174,18 @@
       "title": "Check Status (Process/TCP/UDP/DNS)",
       "type": "stat",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
       },
       "targets": [
         {
           "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
           },
-          "editorMode": "code",
-          "expr": "dns_ha_check_status",
-          "instant": true,
-          "legendFormat": "{{instance}} - {{check}}",
+          "query": "SELECT last(\"dns_ha_check_status\") FROM \"prometheus\" WHERE $timeFilter GROUP BY \"url\", \"check\"",
+          "alias": "$tag_url - $tag_check",
+          "rawQuery": true,
           "refId": "A"
         }
       ],
@@ -230,18 +226,18 @@
       "title": "DNS Query RTT Latency (ms)",
       "type": "timeseries",
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "type": "influxdb",
+        "uid": "${DS_INFLUXDB}"
       },
       "targets": [
         {
           "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "type": "influxdb",
+            "uid": "${DS_INFLUXDB}"
           },
-          "editorMode": "code",
-          "expr": "dns_ha_check_rtt_seconds * 1000",
-          "legendFormat": "{{instance}} - DNS RTT",
+          "query": "SELECT last(\"dns_ha_check_rtt_seconds\") * 1000 FROM \"prometheus\" WHERE $timeFilter GROUP BY time($__interval), \"url\" fill(null)",
+          "alias": "$tag_url - DNS RTT",
+          "rawQuery": true,
           "refId": "A"
         }
       ],
@@ -259,13 +255,13 @@
   ],
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["dns", "freebsd", "carp", "ha"],
+  "tags": ["dns", "freebsd", "carp", "ha", "telegraf", "influxdb"],
   "time": {
     "from": "now-1h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "DNS HA Agent - Cluster Dashboard",
-  "uid": "dns-ha-agent-dashboard"
+  "title": "DNS HA Agent - Telegraf InfluxDB Dashboard",
+  "uid": "dns-ha-agent-influxdb"
 }

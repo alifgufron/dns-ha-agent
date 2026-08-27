@@ -347,13 +347,16 @@ Add the following configuration to `/etc/telegraf/telegraf.conf`:
 
 ### 4. Grafana Dashboard Setup (v7+ / v8 / v9 / v10 / Latest)
 
-A pre-built, production-ready Grafana dashboard JSON template is included at [`docs/grafana-dashboard.json`](file:///c:/4life/dns-ha-agent/docs/grafana-dashboard.json).
+Pre-built, production-ready Grafana dashboard JSON templates are available in the [`dashboards/`](../dashboards/) directory:
+
+- **For Prometheus Data Source:** [`dashboards/grafana-prometheus.json`](../dashboards/grafana-prometheus.json) (uses PromQL queries)
+- **For Telegraf + InfluxDB Data Source:** [`dashboards/grafana-influxdb.json`](../dashboards/grafana-influxdb.json) (uses InfluxQL queries)
 
 **How to Import into Grafana:**
 1. Open Grafana Web Interface (version 7.0+ or latest).
 2. Go to **Dashboards** → **New** → **Import**.
-3. Upload [`docs/grafana-dashboard.json`](file:///c:/4life/dns-ha-agent/docs/grafana-dashboard.json) or paste its raw JSON content.
-4. Select your **Prometheus Data Source** (or InfluxDB data source if using Telegraf + InfluxQL/Flux) and click **Import**.
+3. Upload [`dashboards/grafana-prometheus.json`](../dashboards/grafana-prometheus.json) (for Prometheus) or [`dashboards/grafana-influxdb.json`](../dashboards/grafana-influxdb.json) (for Telegraf + InfluxDB).
+4. Select your **Prometheus** or **InfluxDB** Data Source and click **Import**.
 
 ---
 
