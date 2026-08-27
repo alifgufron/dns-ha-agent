@@ -129,6 +129,15 @@
         }
       ],
       "title": "Node Health Score",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "gauge"
     },
     {
@@ -213,6 +222,15 @@
         }
       ],
       "title": "CARP Master Role",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "stat"
     },
     {
@@ -284,6 +302,15 @@
         }
       ],
       "title": "CARP Demotion Penalty",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "stat"
     },
     {
@@ -347,6 +374,15 @@
         }
       ],
       "title": "CARP Priority (Advskew)",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "stat"
     },
     {
@@ -459,6 +495,15 @@
         }
       ],
       "title": "CARP Master / Standby Timeline",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "state-timeline"
     },
     {
@@ -555,6 +600,15 @@
         }
       ],
       "title": "DNS Daemon (named/dnsdist)",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "stat"
     },
     {
@@ -639,6 +693,15 @@
         }
       ],
       "title": "TCP Listener (:53)",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "stat"
     },
     {
@@ -723,6 +786,15 @@
         }
       ],
       "title": "UDP Listener (:53)",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "stat"
     },
     {
@@ -915,6 +987,15 @@
         }
       ],
       "title": "DNS Query Round-Trip Latency (ms)",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "timeseries"
     },
     {
@@ -1025,6 +1106,15 @@
         }
       ],
       "title": "Historical Health Score",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([\\d.]+):\\d+",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "timeseries"
     }
   ],
@@ -1058,5 +1148,6 @@
   },
   "timezone": "browser",
   "title": "DNS HA Agent — FreeBSD CARP Cluster (Prometheus)",
-  "uid": "dns-ha-agent-prometheus"
+  "uid": "dns-ha-agent-prometheus",
+  "version": 2
 }
